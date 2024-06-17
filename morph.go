@@ -70,6 +70,7 @@ type Context struct {
   db *sql.DB
   sql_path string
   migration_file *os.File
+  migration_file_path string
 }
 
 type ParsedStmts struct {
@@ -387,6 +388,8 @@ func create_next_migration(ctx *Context) {
     next_migration_file =  path.Join(MIGRATION_FOLDER, fmt.Sprintf("%d.sql", extract_number_from_migration_file_name(migrations[len(migrations)-1]) + 1))
   }
 
+  ctx.migration_file_path = next_migration_file
+
   f, e := os.Create(next_migration_file)
   perr(e)
 
@@ -429,17 +432,6 @@ func main() {
   verify_all_migration_files(ctx);
 
   if strings.Compare(ctx.cmd, MAKE_MIGRATIONS_CMD) == 0 {
-    // Check if all migration files in the migrations folder have been executed
-    // -- If they have all been executed
-    // Check if the hashes of all executed migrations are the same as what we have in the db. If they're not, throw an error.
-    // Process all statements in sql-path
-    // Mark the statements that are not found within the statements table 
-    // ---- If there are not any unknown statements
-    // there are no migrations
-    // ---- If there are unknown statements 
-    // Create new migration file
-    // Copy the statements to the latest migration file with the "migration required" tab
-
     if !have_all_migrations_been_executed(ctx) {
       fmt.Println("There are migrations that have not yet been executed.");
       os.Exit(3)
@@ -459,7 +451,7 @@ func main() {
     copy_changed_statements_to_next_migration_file(ctx, stmts)
     update_statements_in_db(ctx, stmts)
 
-    fmt.Println("New migrations have been created.")
+    fmt.Printf("New migrations have been created in %s.\n", ctx.migration_file_path)
   } else if strings.Compare(ctx.cmd, MIGRATE_CMD) == 0 {
     if have_all_migrations_been_executed(ctx) {
       fmt.Println("No migrations to run.")
