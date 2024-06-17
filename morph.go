@@ -55,6 +55,37 @@ const (
   UNCHANGED
 )
 
+type StmtType int
+
+const (
+  TABLE StmtType = iota
+  VIEW
+  MATERIALIZED_VIEW
+  INDEX
+  SEQUENCE
+  SCHEMA
+  FUNCTION
+  PROCEDURE
+  TRIGGER
+  RULE
+  CONSTRAINT
+  TYPE
+  DOMAIN
+  AGGREGATE
+  COLLATION
+  EXTENSION
+  LANGUAGE
+  TABLESPACE
+  ROLE
+  USER
+  GROUP
+  POLICY
+  PUBLICATION
+  SUBSCRIPTION
+  INSERT
+  UNKNOWN_TYPE
+)
+
 type DbContext struct { 
   pg_host string 
   pg_port int
@@ -73,13 +104,15 @@ type Context struct {
   migration_file_path string
 }
 
-type ParsedStmts struct {
+type ParsedStmt struct {
   stmt *pg_query.RawStmt
   has_name bool
-  name string
+  stmt_name string
   deparsed string
   hash string
   status StmtStatus
+  stmt_type StmtType
+  depends_on []string
 }
 
 func perr(e error) {
@@ -154,22 +187,91 @@ func deparse_raw_stmt(x *pg_query.RawStmt) (string, error) {
   return deparsed + ";", err
 }
 
-func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmts {
-  var ps []*ParsedStmts
+func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
+  stmt := x.GetStmt()
+
+  create_table := stmt.GetCreateStmt();
+  create_view := stmt.GetViewStmt()
+  create_index := stmt.GetIndexStmt()
+  create_sequence := stmt.GetCreateSeqStmt()
+  create_schema := stmt.GetCreateSchemaStmt()
+  create_function := stmt.GetCreateFunctionStmt()
+  create_trigger := stmt.GetCreateTrigStmt()
+  create_domain := stmt.GetCreateDomainStmt()
+  create_extension := stmt.GetCreateExtensionStmt()
+  create_tablespace := stmt.GetCreateTableSpaceStmt()
+  create_role := stmt.GetCreateRoleStmt()
+  create_policy := stmt.GetCreatePolicyStmt()
+  create_publication := stmt.GetCreatePublicationStmt()
+  create_subscription := stmt.GetCreateSubscriptionStmt()
+
+  insert_stmt := stmt.GetInsertStmt()
+
+  if create_table != nil {
+    ps.stmt_type = TABLE
+    ps.stmt_name = create_table.GetRelation().Relname
+  } else if create_view != nil {
+    ps.stmt_type = VIEW
+    ps.stmt_name = create_view.GetView().Relname
+  } else if create_index != nil {
+    ps.stmt_type = INDEX
+    ps.stmt_name = create_index.Idxname
+  } else if create_sequence != nil {
+    ps.stmt_type = SEQUENCE 
+  } else if create_schema != nil {
+    ps.stmt_type = SCHEMA
+    ps.stmt_name = create_schema.Schemaname
+  } else if create_function != nil {
+    ps.stmt_type = FUNCTION
+  } else if create_trigger != nil {
+    ps.stmt_type = TRIGGER
+    ps.stmt_name = create_trigger.Trigname
+  } else if create_domain != nil {
+    ps.stmt_type = DOMAIN
+  } else if create_extension != nil {
+    ps.stmt_type = EXTENSION
+    ps.stmt_name = create_extension.GetExtname()
+  } else if create_tablespace != nil {
+    ps.stmt_type = TABLESPACE
+    ps.stmt_name = create_table.Tablespacename
+  } else if create_role != nil {
+    ps.stmt_type = ROLE
+  } else if create_policy != nil {
+    ps.stmt_type = POLICY
+    ps.stmt_name = create_policy.PolicyName
+  } else if create_publication != nil {
+    ps.stmt_type = PUBLICATION
+    ps.stmt_name = create_publication.Pubname
+  } else if create_subscription != nil {
+    ps.stmt_type = SUBSCRIPTION
+    ps.stmt_name = create_subscription.Subname
+  } else if insert_stmt != nil {
+    ps.stmt_type = INSERT
+  } else {
+    fmt.Printf("Unknown statement %v\n", ps);
+    os.Exit(1)
+  }
+}
+
+func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
+  var ps []*ParsedStmt
 
   for _, x := range pr.Stmts {
+    var depends_on []string
     dp, err := deparse_raw_stmt(x)
     perr(err)
-    ps = append(
-      ps, 
-      &ParsedStmts{ 
-        x, 
-        false,
-        "",
-        dp, 
-        hash_string(dp), 
-        UNKNOWN, 
-      }) 
+    nps := &ParsedStmt{ 
+      x, 
+      false,
+      "",
+      dp, 
+      hash_string(dp), 
+      UNKNOWN, 
+      UNKNOWN_TYPE,
+      depends_on,
+    }
+    set_stmt_type_and_name(x, nps)
+    ps = append(ps, nps) 
   }
 
   return ps
@@ -180,8 +282,8 @@ func parse_sql(code string) (*pg_query.ParseResult, error) {
   return pr, err
 }
 
-func process_sql_files(ctx *Context) []*ParsedStmts{
-  var ps []*ParsedStmts
+func process_sql_files(ctx *Context) []*ParsedStmt{
+  var ps []*ParsedStmt
 
   err := filepath.Walk(ctx.sql_path, func(path string, info fs.FileInfo, err error) error {
     perr(err)
@@ -340,13 +442,13 @@ func verify_all_migration_files(ctx *Context) {
   }
 }
 
-func is_stmt_hash_found_in_db(ctx *Context, stmt *ParsedStmts) bool {
+func is_stmt_hash_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
   r, e := ctx.db.Query("select * from morph.statements where stmt_hash=$1", stmt.hash)
   perr(e)
   return r.Next()
 }
 
-func set_stmt_status(ctx *Context, stmts []*ParsedStmts) []*ParsedStmts {
+func set_stmt_status(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
   for _, stmt := range stmts {
     if is_stmt_hash_found_in_db(ctx, stmt) {
       stmt.status = UNCHANGED
@@ -358,7 +460,7 @@ func set_stmt_status(ctx *Context, stmts []*ParsedStmts) []*ParsedStmts {
   return stmts
 }
 
-func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmts) bool {
+func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmt) bool {
   for _, s := range stmts {
     if s.status == CHANGED {
       return true
@@ -368,7 +470,7 @@ func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmts) bool {
   return false
 }
 
-func copy_changed_statements_to_next_migration_file(ctx *Context, stmts []*ParsedStmts) {
+func copy_changed_statements_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
   for _, stmt := range stmts {
     if stmt.status == UNCHANGED {
       continue
@@ -396,14 +498,19 @@ func create_next_migration(ctx *Context) {
   ctx.migration_file = f
 }
 
-func update_statements_in_db(ctx *Context, stmts []*ParsedStmts) {
+func update_statements_in_db(ctx *Context, stmts []*ParsedStmt) {
   for _, stmt := range stmts {
     if stmt.status != CHANGED {
       continue
     }
 
-    _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash) values ($1, $2)", stmt.deparsed, stmt.hash)
-    perr(e)
+    if stmt.stmt_name == "" {
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash) values ($1, $2)", stmt.deparsed, stmt.hash)
+      perr(e)
+    } else {
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name) values ($1, $2, $3)", stmt.deparsed, stmt.hash, stmt.stmt_name)
+      perr(e)
+    }
   }
 }
 
