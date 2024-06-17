@@ -1,3 +1,3 @@
-create or replace function insert_person(age integer) returns void as $$
-  
+create or replace function insert_person(age text) returns void as $$
+   
 $$ language sql;
