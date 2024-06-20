@@ -1,4 +1,4 @@
-create or replace function insert_person(i_name text, i_age integer) returns integer as $$
+create or replace function public.insert_person(i_name text, i_age integer) returns integer as $$
 declare
   i_id integer; 
 begin

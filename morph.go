@@ -21,6 +21,7 @@ import (
 const MIGRATION_FOLDER = "migrations"
 const MIGRATION_REQUIRED = "-- MIGRATION REQUIRED"
 const MAKE_MIGRATIONS_CMD = "makemigrations"
+const CLEAR_MIGRATIONS_CMD = "clearmigrations"
 const MIGRATE_CMD = "migrate"
 
 const MIGRATION_SCHEMA = `
@@ -37,6 +38,7 @@ create table if not exists morph.statements (
   id serial primary key,
   stmt text not null,
   stmt_hash text unique not null,
+  stmt_type integer not null,
   stmt_name text default null,
   created timestamp default now(),
   updated timestamp default now()
@@ -187,6 +189,16 @@ func deparse_raw_stmt(x *pg_query.RawStmt) (string, error) {
   return deparsed + ";", err
 }
 
+func pg_nodes_to_string(nodes []*pg_query.Node) string {
+  var name []string 
+
+  for _, node := range nodes {
+    name = append(name, node.GetString_().Sval)
+  }
+
+  return strings.Join(name, ".")
+}
+
 func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
   stmt := x.GetStmt()
 
@@ -210,41 +222,52 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
   if create_table != nil {
     ps.stmt_type = TABLE
     ps.stmt_name = create_table.GetRelation().Relname
+    ps.has_name = true
   } else if create_view != nil {
     ps.stmt_type = VIEW
     ps.stmt_name = create_view.GetView().Relname
+    ps.has_name = true
   } else if create_index != nil {
     ps.stmt_type = INDEX
     ps.stmt_name = create_index.Idxname
+    ps.has_name = true
   } else if create_sequence != nil {
     ps.stmt_type = SEQUENCE 
   } else if create_schema != nil {
     ps.stmt_type = SCHEMA
     ps.stmt_name = create_schema.Schemaname
+    ps.has_name = true
   } else if create_function != nil {
     ps.stmt_type = FUNCTION
+    ps.stmt_name = pg_nodes_to_string(create_function.Funcname) 
   } else if create_trigger != nil {
     ps.stmt_type = TRIGGER
     ps.stmt_name = create_trigger.Trigname
+    ps.has_name = true
   } else if create_domain != nil {
     ps.stmt_type = DOMAIN
   } else if create_extension != nil {
     ps.stmt_type = EXTENSION
     ps.stmt_name = create_extension.GetExtname()
+    ps.has_name = true
   } else if create_tablespace != nil {
     ps.stmt_type = TABLESPACE
     ps.stmt_name = create_table.Tablespacename
+    ps.has_name = true
   } else if create_role != nil {
     ps.stmt_type = ROLE
   } else if create_policy != nil {
     ps.stmt_type = POLICY
     ps.stmt_name = create_policy.PolicyName
+    ps.has_name = true
   } else if create_publication != nil {
     ps.stmt_type = PUBLICATION
     ps.stmt_name = create_publication.Pubname
+    ps.has_name = true
   } else if create_subscription != nil {
     ps.stmt_type = SUBSCRIPTION
     ps.stmt_name = create_subscription.Subname
+    ps.has_name = true
   } else if insert_stmt != nil {
     ps.stmt_type = INSERT
   } else {
@@ -448,12 +471,27 @@ func is_stmt_hash_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
   return r.Next()
 }
 
+func is_stmt_name_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
+  if !stmt.has_name {
+    return false
+  }
+
+  r, e := ctx.db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.stmt_name, stmt.stmt_type);
+  perr(e)
+  return r.Next()
+}
+
 func set_stmt_status(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
   for _, stmt := range stmts {
-    if is_stmt_hash_found_in_db(ctx, stmt) {
+    stmt_hash_found := is_stmt_hash_found_in_db(ctx, stmt)
+    stmt_name_found := is_stmt_name_found_in_db(ctx, stmt)
+
+    if (stmt_name_found && stmt_hash_found) || (!stmt_name_found && stmt_hash_found) {
       stmt.status = UNCHANGED
-    } else {
+    } else if stmt_name_found && !stmt_hash_found {
       stmt.status = CHANGED
+    } else {
+      stmt.status = NEW
     }
   }
 
@@ -462,8 +500,13 @@ func set_stmt_status(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
 
 func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmt) bool {
   for _, s := range stmts {
-    if s.status == CHANGED {
-      return true
+    switch s.status {
+      case CHANGED:
+        return true
+      case NEW:
+        panic("CAN'T PROCESS NEW");
+      case UNCHANGED:
+        return false;
     }
   }
 
@@ -505,10 +548,10 @@ func update_statements_in_db(ctx *Context, stmts []*ParsedStmt) {
     }
 
     if stmt.stmt_name == "" {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash) values ($1, $2)", stmt.deparsed, stmt.hash)
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3)", stmt.deparsed, stmt.hash, stmt.stmt_type)
       perr(e)
     } else {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name) values ($1, $2, $3)", stmt.deparsed, stmt.hash, stmt.stmt_name)
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4)", stmt.deparsed, stmt.hash, stmt.stmt_name, stmt.stmt_type)
       perr(e)
     }
   }
@@ -522,6 +565,16 @@ func execute_migrations(ctx *Context) {
   }
 }
 
+func clear_migrations(ctx *Context) {
+  os.RemoveAll(MIGRATION_FOLDER)
+  _, e := ctx.db.Exec("drop schema if exists morph cascade");
+  perr(e)
+  _, e = ctx.db.Exec("drop schema if exists public cascade");
+  perr(e)
+  _, e = ctx.db.Exec("create schema if not exists public")
+  perr(e)
+}
+
 func main() {
   ctx := parse_args()
   db := create_db_connection(ctx.db_context)
@@ -532,6 +585,12 @@ func main() {
   perr(te)
 
   ctx.db_tx = tx
+
+  if strings.Compare(ctx.cmd, CLEAR_MIGRATIONS_CMD) == 0 {
+    fmt.Println("Clearning...");
+    clear_migrations(ctx);
+    ctx.cmd = MAKE_MIGRATIONS_CMD;
+  }
 
   init_migration_schema(ctx);
   init_migrations_folder(ctx)

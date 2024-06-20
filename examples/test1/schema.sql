@@ -5,7 +5,8 @@ create table person (
 
 create table name (
   id integer references person(id) not null,
-  name text not null
+  name text not null,
+  created timestamp default now()
 );
 
 create table age (
