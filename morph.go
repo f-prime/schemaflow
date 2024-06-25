@@ -4,14 +4,16 @@ import (
 	"crypto/sha1"
 	sql "database/sql"
 	"encoding/hex"
-	"path"
-	"sort"
-	"strconv"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	_ "github.com/lib/pq"
@@ -109,7 +111,7 @@ type Context struct {
 type ParsedStmt struct {
   stmt *pg_query.RawStmt
   has_name bool
-  stmt_name string
+  name string
   deparsed string
   hash string
   status StmtStatus
@@ -202,77 +204,182 @@ func pg_nodes_to_string(nodes []*pg_query.Node) string {
 func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
   stmt := x.GetStmt()
 
-  create_table := stmt.GetCreateStmt();
-  create_view := stmt.GetViewStmt()
-  create_index := stmt.GetIndexStmt()
-  create_sequence := stmt.GetCreateSeqStmt()
-  create_schema := stmt.GetCreateSchemaStmt()
-  create_function := stmt.GetCreateFunctionStmt()
-  create_trigger := stmt.GetCreateTrigStmt()
-  create_domain := stmt.GetCreateDomainStmt()
-  create_extension := stmt.GetCreateExtensionStmt()
-  create_tablespace := stmt.GetCreateTableSpaceStmt()
-  create_role := stmt.GetCreateRoleStmt()
-  create_policy := stmt.GetCreatePolicyStmt()
-  create_publication := stmt.GetCreatePublicationStmt()
-  create_subscription := stmt.GetCreateSubscriptionStmt()
+  switch stmt.Node.(type) {
+    case *pg_query.Node_CreateStmt: {
+      ps.stmt_type = TABLE
+      ps.name = stmt.GetCreateStmt().GetRelation().GetRelname()
+      ps.has_name = true;
+    } 
 
-  insert_stmt := stmt.GetInsertStmt()
+    case *pg_query.Node_ViewStmt: {
+      ps.stmt_type = VIEW
+      ps.name = stmt.GetViewStmt().GetView().GetRelname()
+      ps.has_name = true;
+    } 
 
-  if create_table != nil {
-    ps.stmt_type = TABLE
-    ps.stmt_name = create_table.GetRelation().Relname
-    ps.has_name = true
-  } else if create_view != nil {
-    ps.stmt_type = VIEW
-    ps.stmt_name = create_view.GetView().Relname
-    ps.has_name = true
-  } else if create_index != nil {
-    ps.stmt_type = INDEX
-    ps.stmt_name = create_index.Idxname
-    ps.has_name = true
-  } else if create_sequence != nil {
-    ps.stmt_type = SEQUENCE 
-  } else if create_schema != nil {
-    ps.stmt_type = SCHEMA
-    ps.stmt_name = create_schema.Schemaname
-    ps.has_name = true
-  } else if create_function != nil {
-    ps.stmt_type = FUNCTION
-    ps.stmt_name = pg_nodes_to_string(create_function.Funcname) 
-  } else if create_trigger != nil {
-    ps.stmt_type = TRIGGER
-    ps.stmt_name = create_trigger.Trigname
-    ps.has_name = true
-  } else if create_domain != nil {
-    ps.stmt_type = DOMAIN
-  } else if create_extension != nil {
-    ps.stmt_type = EXTENSION
-    ps.stmt_name = create_extension.GetExtname()
-    ps.has_name = true
-  } else if create_tablespace != nil {
-    ps.stmt_type = TABLESPACE
-    ps.stmt_name = create_table.Tablespacename
-    ps.has_name = true
-  } else if create_role != nil {
-    ps.stmt_type = ROLE
-  } else if create_policy != nil {
-    ps.stmt_type = POLICY
-    ps.stmt_name = create_policy.PolicyName
-    ps.has_name = true
-  } else if create_publication != nil {
-    ps.stmt_type = PUBLICATION
-    ps.stmt_name = create_publication.Pubname
-    ps.has_name = true
-  } else if create_subscription != nil {
-    ps.stmt_type = SUBSCRIPTION
-    ps.stmt_name = create_subscription.Subname
-    ps.has_name = true
-  } else if insert_stmt != nil {
-    ps.stmt_type = INSERT
-  } else {
-    fmt.Printf("Unknown statement %v\n", ps);
-    os.Exit(1)
+    case *pg_query.Node_IndexStmt: {
+      ps.stmt_type = INDEX
+      ps.name = stmt.GetIndexStmt().GetIdxname()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateSeqStmt: {
+      ps.stmt_type = SEQUENCE; 
+      ps.name = stmt.GetCreateSeqStmt().GetSequence().GetRelname()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateSchemaStmt: {
+      ps.stmt_type = SCHEMA;
+      ps.name = stmt.GetCreateSchemaStmt().GetSchemaname()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateFunctionStmt: {
+      ps.stmt_type = FUNCTION;
+      ps.name = pg_nodes_to_string(stmt.GetCreateFunctionStmt().GetFuncname())
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateTrigStmt: {
+      ps.stmt_type = TRIGGER;
+      ps.name = stmt.GetCreateTrigStmt().GetTrigname()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateDomainStmt: {
+      ps.stmt_type = DOMAIN;
+      ps.name = pg_nodes_to_string(stmt.GetCreateDomainStmt().GetDomainname())
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateExtensionStmt: {
+      ps.stmt_type = EXTENSION;
+      ps.name = stmt.GetExecuteStmt().GetName()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateTableSpaceStmt: {
+      ps.stmt_type = TABLESPACE
+      ps.name = stmt.GetCreateTableSpaceStmt().GetTablespacename()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateRoleStmt: {
+      ps.stmt_type = ROLE
+      ps.name = stmt.GetCreateRoleStmt().GetRole()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreatePolicyStmt: {
+      ps.stmt_type = POLICY
+      ps.name = stmt.GetCreatePolicyStmt().GetPolicyName()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreatePublicationStmt: {
+      ps.stmt_type = PUBLICATION
+      ps.name = stmt.GetCreatePublicationStmt().GetPubname()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_CreateSubscriptionStmt: {
+      ps.stmt_type = SUBSCRIPTION
+      ps.name = stmt.GetCreateSubscriptionStmt().GetSubname()
+      ps.has_name = true;
+    }
+
+    case *pg_query.Node_InsertStmt: {
+      ps.stmt_type = INSERT
+      ps.has_name = true;
+    }
+
+    default: {
+      log.Panicf("Unknown stmt type %v\n", stmt.Node)
+    }
+  }
+}
+
+func get_current_version_of_stmt(ctx *Context, stmt *ParsedStmt) (*pg_query.RawStmt, error) {
+  if stmt.has_name {
+    var code string
+    err := ctx.db.QueryRow("select stmt from morph.statements where stmt_type=$1 and stmt_name=$2", stmt.stmt_type, stmt.name).Scan(&code); 
+    if err != nil {
+      return nil, err 
+    }
+
+    result, err2 := pg_query.Parse(code)
+
+    if err2 != nil {
+      return nil, err2 
+    }
+
+    stmts := result.GetStmts()
+
+    if len(stmts) == 0 {
+      return nil, errors.New("Statements array is empty.")
+    }
+
+    return result.GetStmts()[0], nil
+  }
+
+  return nil, errors.New(fmt.Sprintf("Could not get current version of statement. %v\n", stmt));
+}
+
+func write_sql_stmt_to_migration_file(ctx *Context, stmt string, add_migration_required_line bool) {
+  if add_migration_required_line {
+    ctx.migration_file.WriteString(MIGRATION_REQUIRED + "\n")
+  }
+
+  if !strings.HasSuffix(stmt, ";") {
+    stmt += ";"
+  }
+
+  ctx.migration_file.WriteString(stmt + "\n")
+}
+
+func write_migration_for_stmt(ctx *Context, stmt *ParsedStmt) {
+  switch stmt.stmt_type {
+    case FUNCTION: {
+      drop_fn := fmt.Sprintf("DROP FUNCTION IF EXISTS %s", stmt.name)
+      write_sql_stmt_to_migration_file(ctx, drop_fn, false)
+      write_sql_stmt_to_migration_file(ctx, stmt.deparsed, false)
+    }
+
+    //case TABLE: {
+    //  create_tbl_stmt := stmt.stmt.GetStmt().GetCreateStmt()
+    //  cv, e := get_current_version_of_stmt(ctx, stmt)
+
+    //  fmt.Printf("ctx: %v %v\n", cv, e)
+
+    //  for _, col := range create_tbl_stmt.TableElts {
+    //    c := col.GetColumnDef();
+    //    fmt.Printf("c: %v\n", c)
+    //  }
+    //  panic("ASD")
+    //}
+
+    default: {
+      cv, e := get_current_version_of_stmt(ctx, stmt)
+
+      if e != nil {
+        write_sql_stmt_to_migration_file(ctx, stmt.deparsed, true)
+      } else {
+        deparsed, err := deparse_raw_stmt(cv)
+        perr(err)
+        block := fmt.Sprintf(`/*
+%s
+
+Currently:
+%s
+
+Changed to:
+%s
+*/
+`, MIGRATION_REQUIRED, deparsed, stmt.deparsed) 
+        ctx.migration_file.WriteString(block)
+      }
+    }
   }
 }
 
@@ -322,8 +429,7 @@ func process_sql_files(ctx *Context) []*ParsedStmt{
     parsed_file, parse_err := parse_sql(string(fdata))
 
     if parse_err != nil {
-      fmt.Printf("Syntax Error in %v:\n\n %v\n", path, parse_err)
-      os.Exit(3)
+      log.Panicf("Syntax Error in %v:\n\n %v\n", path, parse_err)
     }
 
     extracted := extract_stmts(parsed_file)
@@ -459,8 +565,7 @@ func verify_all_migration_files(ctx *Context) {
 
   for _, f := range migration_files {
     if !does_migration_with_hash_exist_in_db(ctx, hash_file(f)) {
-      fmt.Printf("Migration file %s has does not match the checksum in the database.\n", f)
-      os.Exit(1)
+      log.Panicf("Migration file %s has does not match the checksum in the database.\n", f)
     }
   }
 }
@@ -476,7 +581,7 @@ func is_stmt_name_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
     return false
   }
 
-  r, e := ctx.db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.stmt_name, stmt.stmt_type);
+  r, e := ctx.db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.name, stmt.stmt_type);
   perr(e)
   return r.Next()
 }
@@ -504,23 +609,26 @@ func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmt) bool {
       case CHANGED:
         return true
       case NEW:
-        panic("CAN'T PROCESS NEW");
-      case UNCHANGED:
-        return false;
+        return true
     }
   }
 
   return false
 }
 
-func copy_changed_statements_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
+func write_migrations_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
   for _, stmt := range stmts {
     if stmt.status == UNCHANGED {
       continue
     }
   
-    ctx.migration_file.Write([]byte(MIGRATION_REQUIRED + "\n"))
-    ctx.migration_file.Write([]byte(stmt.deparsed + "\n"))
+
+    if stmt.status == NEW {
+      ctx.migration_file.WriteString(MIGRATION_REQUIRED + "\n")
+      ctx.migration_file.WriteString(stmt.deparsed + "\n")
+    } else {
+      write_migration_for_stmt(ctx, stmt)
+    }
   }
 }
 
@@ -543,15 +651,15 @@ func create_next_migration(ctx *Context) {
 
 func update_statements_in_db(ctx *Context, stmts []*ParsedStmt) {
   for _, stmt := range stmts {
-    if stmt.status != CHANGED {
+    if stmt.status == UNCHANGED {
       continue
     }
 
-    if stmt.stmt_name == "" {
+    if !stmt.has_name {
       _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3)", stmt.deparsed, stmt.hash, stmt.stmt_type)
       perr(e)
     } else {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4)", stmt.deparsed, stmt.hash, stmt.stmt_name, stmt.stmt_type)
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4)", stmt.deparsed, stmt.hash, stmt.name, stmt.stmt_type)
       perr(e)
     }
   }
@@ -563,6 +671,33 @@ func execute_migrations(ctx *Context) {
     perr(execute_sql_file(ctx, m))
     perr(mark_migration_as_executed(ctx, m))
   }
+}
+
+func clear_removed_statements_from_db(ctx *Context, stmts []*ParsedStmt) {
+  var hash string
+  
+  query, err := ctx.db.Query("select stmt_hash from morph.statements")
+  perr(err)
+  defer query.Close()
+
+  for query.Next() {
+    perr(query.Scan(&hash))
+
+    found := false
+
+    for _, stmt := range stmts {
+      if stmt.hash == hash {
+        found = true
+        break
+      }
+    }
+
+    if !found {
+      log.Printf("Removing %s\n", hash);
+      ctx.db_tx.Exec("delete from morph.statements where stmt_hash=$1", hash)
+    }
+  }
+
 }
 
 func clear_migrations(ctx *Context) {
@@ -587,7 +722,7 @@ func main() {
   ctx.db_tx = tx
 
   if strings.Compare(ctx.cmd, CLEAR_MIGRATIONS_CMD) == 0 {
-    fmt.Println("Clearning...");
+    log.Println("Clearning...");
     clear_migrations(ctx);
     ctx.cmd = MAKE_MIGRATIONS_CMD;
   }
@@ -599,38 +734,35 @@ func main() {
 
   if strings.Compare(ctx.cmd, MAKE_MIGRATIONS_CMD) == 0 {
     if !have_all_migrations_been_executed(ctx) {
-      fmt.Println("There are migrations that have not yet been executed.");
-      os.Exit(3)
+      log.Fatal("There are migrations that have not yet been executed.");
     }
 
     stmts := process_sql_files(ctx)
     set_stmt_status(ctx, stmts)
 
     if !do_any_stmts_require_migration(ctx, stmts) {
-      fmt.Println("No migrations required.")
-      os.Exit(3)
+      log.Fatal("No migrations required.")
     }
     
     create_next_migration(ctx)
+    clear_removed_statements_from_db(ctx, stmts)
     defer ctx.migration_file.Close()
 
-    copy_changed_statements_to_next_migration_file(ctx, stmts)
+    write_migrations_to_next_migration_file(ctx, stmts)
     update_statements_in_db(ctx, stmts)
 
     fmt.Printf("New migrations have been created in %s.\n", ctx.migration_file_path)
   } else if strings.Compare(ctx.cmd, MIGRATE_CMD) == 0 {
     if have_all_migrations_been_executed(ctx) {
-      fmt.Println("No migrations to run.")
-      os.Exit(0)
+      log.Fatal("No migrations to run.")
     }
 
     if !have_all_migrations_been_resolved(ctx) {
-      fmt.Println("Not all migrations have been resolved.")
-      os.Exit(1)
+      log.Fatal("Not all migrations have been resolved.")
     }
 
     execute_migrations(ctx)
-    fmt.Println("Migrations run successfully.")
+    log.Println("Migrations run successfully.")
   }
 
   perr(ctx.db_tx.Commit())

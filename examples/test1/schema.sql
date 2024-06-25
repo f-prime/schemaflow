@@ -1,6 +1,7 @@
 create table person (
   id serial primary key,
-  created timestamp default now()
+  created timestamp default now(),
+  updated timestamp default now()
 );
 
 create table name (
