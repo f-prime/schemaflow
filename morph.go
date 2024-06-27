@@ -66,10 +66,20 @@ const (
   VIEW
   MATERIALIZED_VIEW
   INDEX
+  SET
   SEQUENCE
   SCHEMA
   FUNCTION
   PROCEDURE
+  COMMENT
+  GRANT
+  GRANT_ROLE
+  ENUM
+  UPDATE
+  ALTER_DEFAULT_PRIVILEGES
+  ALTER_POLICY
+  ALTER_TABLE
+  DO
   TRIGGER
   RULE
   CONSTRAINT
@@ -78,6 +88,7 @@ const (
   AGGREGATE
   COLLATION
   EXTENSION
+  BEGIN
   LANGUAGE
   TABLESPACE
   ROLE
@@ -87,6 +98,8 @@ const (
   PUBLICATION
   SUBSCRIPTION
   INSERT
+  DROP_OWNED
+  DROP
   UNKNOWN_TYPE
 )
 
@@ -207,13 +220,38 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
   switch stmt.Node.(type) {
     case *pg_query.Node_CreateStmt: {
       ps.stmt_type = TABLE
-      ps.name = stmt.GetCreateStmt().GetRelation().GetRelname()
-      ps.has_name = true;
+
+      relation := stmt.GetCreateStmt().GetRelation()
+
+      schema_name := relation.GetSchemaname() 
+      rel_name := relation.GetRelname()
+
+      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name)
+
+      ps.has_name = true
     } 
+
+    case *pg_query.Node_CreateTableAsStmt: {
+      ps.stmt_type = MATERIALIZED_VIEW
+      into := stmt.GetCreateTableAsStmt().GetInto().GetRel()
+
+      schema_name := into.GetSchemaname()
+      rel_name := into.GetRelname()
+
+      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name) 
+      ps.has_name = true
+    }
+
 
     case *pg_query.Node_ViewStmt: {
       ps.stmt_type = VIEW
-      ps.name = stmt.GetViewStmt().GetView().GetRelname()
+
+      view := stmt.GetViewStmt().GetView()
+
+      schema_name := view.GetSchemaname()
+      rel_name := view.GetRelname()
+
+      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name)
       ps.has_name = true;
     } 
 
@@ -291,11 +329,79 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
 
     case *pg_query.Node_InsertStmt: {
       ps.stmt_type = INSERT
-      ps.has_name = true;
+      ps.has_name = false;
+    }
+
+    case *pg_query.Node_VariableSetStmt: {
+      ps.stmt_type = SET
+      ps.has_name = true
+      ps.name = stmt.GetVariableSetStmt().GetName()
+    }
+
+    case *pg_query.Node_DropStmt: {
+      ps.stmt_type = DROP
+      ps.has_name = false
+    }
+
+    case *pg_query.Node_DropOwnedStmt: {
+      ps.stmt_type = DROP_OWNED
+    }
+
+    case *pg_query.Node_CommentStmt: {
+      ps.stmt_type = COMMENT
+    }
+
+    case *pg_query.Node_GrantStmt: {
+      ps.stmt_type = GRANT
+    }
+
+    case *pg_query.Node_GrantRoleStmt: {
+      ps.stmt_type = GRANT_ROLE
+    }
+
+    case *pg_query.Node_AlterTableStmt: {
+      ps.stmt_type = ALTER_TABLE
+    }
+
+    case *pg_query.Node_DoStmt: {
+      ps.stmt_type = DO
+    }
+
+    case *pg_query.Node_AlterPolicyStmt: {
+      ps.stmt_type = ALTER_POLICY   
+    }
+
+    case *pg_query.Node_CreateEnumStmt: {
+      ps.stmt_type = ENUM
+      ps.name = pg_nodes_to_string(stmt.GetCreateEnumStmt().GetTypeName())
+      ps.has_name = true
+    }
+
+    case *pg_query.Node_CompositeTypeStmt: {
+      ps.stmt_type = TYPE
+      ps.has_name = true
+
+      typevar := stmt.GetCompositeTypeStmt().GetTypevar()
+
+      rel_name := typevar.GetRelname()
+      schema_name := typevar.GetSchemaname()
+
+      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name) 
+    }
+
+    case *pg_query.Node_UpdateStmt: {
+      ps.stmt_type = UPDATE    
+    }
+
+    case *pg_query.Node_AlterDefaultPrivilegesStmt: {
+      ps.stmt_type = ALTER_DEFAULT_PRIVILEGES
     }
 
     default: {
-      log.Panicf("Unknown stmt type %v\n", stmt.Node)
+      json, _ := pg_query.ParseToJSON(ps.deparsed);
+      log.Printf("WARNING: Unknown stmt\nDEPARSED: %v\nJSON: %v\n", ps.deparsed, json)
+      ps.stmt_type = UNKNOWN_TYPE
+      ps.has_name = false
     }
   }
 }
@@ -624,8 +730,7 @@ func write_migrations_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) 
   
 
     if stmt.status == NEW {
-      ctx.migration_file.WriteString(MIGRATION_REQUIRED + "\n")
-      ctx.migration_file.WriteString(stmt.deparsed + "\n")
+      write_sql_stmt_to_migration_file(ctx, stmt.deparsed, false)
     } else {
       write_migration_for_stmt(ctx, stmt)
     }
@@ -656,10 +761,10 @@ func update_statements_in_db(ctx *Context, stmts []*ParsedStmt) {
     }
 
     if !stmt.has_name {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3)", stmt.deparsed, stmt.hash, stmt.stmt_type)
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3) on conflict (stmt_hash) do nothing", stmt.deparsed, stmt.hash, stmt.stmt_type)
       perr(e)
     } else {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4)", stmt.deparsed, stmt.hash, stmt.name, stmt.stmt_type)
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4) on conflict (stmt_hash) do nothing", stmt.deparsed, stmt.hash, stmt.name, stmt.stmt_type)
       perr(e)
     }
   }
