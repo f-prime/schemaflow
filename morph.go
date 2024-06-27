@@ -129,7 +129,6 @@ type ParsedStmt struct {
   hash string
   status StmtStatus
   stmt_type StmtType
-  depends_on []string
 }
 
 func perr(e error) {
@@ -494,7 +493,6 @@ func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
   var ps []*ParsedStmt
 
   for _, x := range pr.Stmts {
-    var depends_on []string
     dp, err := deparse_raw_stmt(x)
     perr(err)
     nps := &ParsedStmt{ 
@@ -505,7 +503,6 @@ func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
       hash_string(dp), 
       UNKNOWN, 
       UNKNOWN_TYPE,
-      depends_on,
     }
     set_stmt_type_and_name(x, nps)
     ps = append(ps, nps) 
@@ -519,7 +516,7 @@ func parse_sql(code string) (*pg_query.ParseResult, error) {
   return pr, err
 }
 
-func process_sql_files(ctx *Context) []*ParsedStmt{
+func process_sql_files(ctx *Context) []*ParsedStmt {
   var ps []*ParsedStmt
 
   err := filepath.Walk(ctx.sql_path, func(path string, info fs.FileInfo, err error) error {
@@ -549,6 +546,10 @@ func process_sql_files(ctx *Context) []*ParsedStmt{
   perr(err)
 
   return ps
+}
+
+func sort_statements_in_dependency_order(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
+  return stmts
 }
 
 func init_migration_schema(ctx *Context) {
@@ -846,6 +847,8 @@ func main() {
     log.Println("Processing SQL Files...")
     stmts := process_sql_files(ctx)
     set_stmt_status(ctx, stmts)
+
+    stmts = sort_statements_in_dependency_order(ctx, stmts)
 
     if !do_any_stmts_require_migration(ctx, stmts) {
       log.Fatal("No migrations required.")
