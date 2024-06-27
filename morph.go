@@ -159,6 +159,7 @@ func list_all_files_in_path(path string) []string {
 func create_db_connection(db_ctx DbContext) *sql.DB {
   conn_str := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", db_ctx.pg_host, db_ctx.pg_port, db_ctx.pg_user, db_ctx.pg_password, db_ctx.pg_db_name);
   dc, err := sql.Open("postgres", conn_str)
+  dc.SetMaxOpenConns(10)
 
   perr(err)
   perr(dc.Ping())
@@ -842,6 +843,7 @@ func main() {
       log.Fatal("There are migrations that have not yet been executed.");
     }
 
+    log.Println("Processing SQL Files...")
     stmts := process_sql_files(ctx)
     set_stmt_status(ctx, stmts)
 
@@ -849,14 +851,17 @@ func main() {
       log.Fatal("No migrations required.")
     }
     
+    log.Println("Creating migrations...")
     create_next_migration(ctx)
     clear_removed_statements_from_db(ctx, stmts)
     defer ctx.migration_file.Close()
 
     write_migrations_to_next_migration_file(ctx, stmts)
+
+    log.Println("Updating statements in db...")
     update_statements_in_db(ctx, stmts)
 
-    fmt.Printf("New migrations have been created in %s.\n", ctx.migration_file_path)
+    log.Printf("New migrations have been created in %s.\n", ctx.migration_file_path)
   } else if strings.Compare(ctx.cmd, MIGRATE_CMD) == 0 {
     if have_all_migrations_been_executed(ctx) {
       log.Fatal("No migrations to run.")
@@ -866,6 +871,7 @@ func main() {
       log.Fatal("Not all migrations have been resolved.")
     }
 
+    log.Println("Executing migrations...")
     execute_migrations(ctx)
     log.Println("Migrations run successfully.")
   }
