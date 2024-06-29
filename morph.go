@@ -85,10 +85,10 @@ const (
   CONSTRAINT
   TYPE
   DOMAIN
+  COLUMN_TYPE // This is an ambiguous type. Could be a domain or a type.
   AGGREGATE
   COLLATION
   EXTENSION
-  BEGIN
   LANGUAGE
   TABLESPACE
   ROLE
@@ -121,14 +121,21 @@ type Context struct {
   migration_file_path string
 }
 
+type Dependency struct {
+  stmt_type StmtType
+  stmt_name string
+}
+
 type ParsedStmt struct {
   stmt *pg_query.RawStmt
   has_name bool
   name string
   deparsed string
+  json string
   hash string
   status StmtStatus
   stmt_type StmtType
+  dependencies []Dependency
 }
 
 func perr(e error) {
@@ -214,21 +221,99 @@ func pg_nodes_to_string(nodes []*pg_query.Node) string {
   return strings.Join(name, ".")
 }
 
-func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
+func pg_rangevar_to_string(rv *pg_query.RangeVar) string {
+  sn := rv.GetSchemaname()
+
+  if len(sn) == 0 {
+    return rv.GetRelname()
+  }
+
+  return sn + "." + rv.GetRelname()
+}
+
+func pg_typename_to_string(tn *pg_query.TypeName) string {
+  names := tn.GetNames()
+  var name []string;
+
+
+  for _, n := range names {
+    str := n.GetString_()
+
+    if str != nil {
+      sval := str.GetSval()
+
+      if len(sval) > 0 {
+        name = append(name, sval)
+      }
+    }
+  }
+
+  return strings.Join(name, ".")
+}
+
+func hydrate_stmt_object(x *pg_query.RawStmt, ps *ParsedStmt) {
   stmt := x.GetStmt()
 
   switch stmt.Node.(type) {
     case *pg_query.Node_CreateStmt: {
       ps.stmt_type = TABLE
 
-      relation := stmt.GetCreateStmt().GetRelation()
+      create_stmt := stmt.GetCreateStmt()
+
+      relation := create_stmt.GetRelation()
+      inher_rels := create_stmt.GetInhRelations()
+      table_elts := create_stmt.GetTableElts()
+
+      for _, column := range table_elts {
+        constraint := column.GetConstraint()
+        column_def := column.GetColumnDef()
+
+        if column_def != nil {
+          constraints := column_def.GetConstraints()
+
+          for _, constraint := range constraints {
+            c := constraint.GetConstraint()
+            fk_constraint := c.GetPktable()
+            function_constraint := c.GetRawExpr().GetFuncCall()
+
+            if fk_constraint != nil {
+              ps.dependencies = append(ps.dependencies, Dependency { TABLE, pg_rangevar_to_string(fk_constraint) })
+            }
+
+            if function_constraint != nil {
+              fname := function_constraint.GetFuncname()
+              fname_string := pg_nodes_to_string(fname)
+              ps.dependencies = append(ps.dependencies, Dependency { FUNCTION, fname_string })
+            }
+          }
+
+          type_name := column_def.GetTypeName()
+          type_name_string := pg_typename_to_string(type_name)
+          if !strings.HasPrefix(type_name_string, "pg_catalog") {
+            ps.dependencies = append(ps.dependencies, Dependency { COLUMN_TYPE, type_name_string })
+          }
+
+        } else if constraint != nil {
+          fk_constraint := constraint.GetPktable()
+
+          if fk_constraint != nil {
+            ps.dependencies = append(ps.dependencies, Dependency { TABLE, pg_rangevar_to_string(fk_constraint) })
+          }
+        }
+      }
+
+      for _, inher_rel := range inher_rels {
+        rel_name := pg_rangevar_to_string(inher_rel.GetRangeVar())
+        ps.dependencies = append(ps.dependencies, Dependency { TABLE, rel_name })
+      }
 
       schema_name := relation.GetSchemaname() 
-      rel_name := relation.GetRelname()
+      
+      if len(schema_name) > 0 {
+        ps.dependencies = append(ps.dependencies, Dependency { SCHEMA, schema_name })
+      }
 
-      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name)
-
-      ps.has_name = true
+      ps.name = pg_rangevar_to_string(relation) 
     } 
 
     case *pg_query.Node_CreateTableAsStmt: {
@@ -236,77 +321,73 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
       into := stmt.GetCreateTableAsStmt().GetInto().GetRel()
 
       schema_name := into.GetSchemaname()
-      rel_name := into.GetRelname()
 
-      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name) 
-      ps.has_name = true
+      ps.dependencies = append(ps.dependencies, Dependency { SCHEMA, schema_name })
+
+      ps.name = pg_rangevar_to_string(into) 
     }
 
 
     case *pg_query.Node_ViewStmt: {
       ps.stmt_type = VIEW
 
-      view := stmt.GetViewStmt().GetView()
+      view_stmt := stmt.GetViewStmt()
+      view := view_stmt.GetView()
 
       schema_name := view.GetSchemaname()
-      rel_name := view.GetRelname()
 
-      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name)
-      ps.has_name = true;
+      ps.dependencies = append(ps.dependencies, Dependency { SCHEMA, schema_name })
+
+      ps.name = pg_rangevar_to_string(view)
     } 
 
     case *pg_query.Node_IndexStmt: {
       ps.stmt_type = INDEX
-      ps.name = stmt.GetIndexStmt().GetIdxname()
-      ps.has_name = true;
+      
+      idx_stmt := stmt.GetIndexStmt()
+      idx_name := idx_stmt.GetIdxname()
+
+      ps.name = idx_name
     }
 
     case *pg_query.Node_CreateSeqStmt: {
       ps.stmt_type = SEQUENCE; 
       ps.name = stmt.GetCreateSeqStmt().GetSequence().GetRelname()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateSchemaStmt: {
       ps.stmt_type = SCHEMA;
       ps.name = stmt.GetCreateSchemaStmt().GetSchemaname()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateFunctionStmt: {
       ps.stmt_type = FUNCTION;
       ps.name = pg_nodes_to_string(stmt.GetCreateFunctionStmt().GetFuncname())
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateTrigStmt: {
       ps.stmt_type = TRIGGER;
       ps.name = stmt.GetCreateTrigStmt().GetTrigname()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateDomainStmt: {
       ps.stmt_type = DOMAIN;
       ps.name = pg_nodes_to_string(stmt.GetCreateDomainStmt().GetDomainname())
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateExtensionStmt: {
       ps.stmt_type = EXTENSION;
       ps.name = stmt.GetExecuteStmt().GetName()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateTableSpaceStmt: {
       ps.stmt_type = TABLESPACE
       ps.name = stmt.GetCreateTableSpaceStmt().GetTablespacename()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateRoleStmt: {
       ps.stmt_type = ROLE
       ps.name = stmt.GetCreateRoleStmt().GetRole()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreatePolicyStmt: {
@@ -318,29 +399,24 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
     case *pg_query.Node_CreatePublicationStmt: {
       ps.stmt_type = PUBLICATION
       ps.name = stmt.GetCreatePublicationStmt().GetPubname()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_CreateSubscriptionStmt: {
       ps.stmt_type = SUBSCRIPTION
       ps.name = stmt.GetCreateSubscriptionStmt().GetSubname()
-      ps.has_name = true;
     }
 
     case *pg_query.Node_InsertStmt: {
       ps.stmt_type = INSERT
-      ps.has_name = false;
     }
 
     case *pg_query.Node_VariableSetStmt: {
       ps.stmt_type = SET
-      ps.has_name = true
       ps.name = stmt.GetVariableSetStmt().GetName()
     }
 
     case *pg_query.Node_DropStmt: {
       ps.stmt_type = DROP
-      ps.has_name = false
     }
 
     case *pg_query.Node_DropOwnedStmt: {
@@ -374,19 +450,14 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
     case *pg_query.Node_CreateEnumStmt: {
       ps.stmt_type = ENUM
       ps.name = pg_nodes_to_string(stmt.GetCreateEnumStmt().GetTypeName())
-      ps.has_name = true
     }
 
     case *pg_query.Node_CompositeTypeStmt: {
       ps.stmt_type = TYPE
-      ps.has_name = true
 
       typevar := stmt.GetCompositeTypeStmt().GetTypevar()
 
-      rel_name := typevar.GetRelname()
-      schema_name := typevar.GetSchemaname()
-
-      ps.name = fmt.Sprintf("%s.%s", schema_name, rel_name) 
+      ps.name = pg_rangevar_to_string(typevar)
     }
 
     case *pg_query.Node_UpdateStmt: {
@@ -398,11 +469,11 @@ func set_stmt_type_and_name(x *pg_query.RawStmt, ps *ParsedStmt) {
     }
 
     default: {
-      json, _ := pg_query.ParseToJSON(ps.deparsed);
-      log.Printf("WARNING: Unknown stmt\nDEPARSED: %v\nJSON: %v\n", ps.deparsed, json)
+      log.Printf("WARNING: Unknown stmt\nDEPARSED: %v\nJSON: %v\n", ps.deparsed, ps.json)
       ps.stmt_type = UNKNOWN_TYPE
-      ps.has_name = false
     }
+
+    ps.has_name = len(ps.name) > 0
   }
 }
 
@@ -491,20 +562,25 @@ Changed to:
 
 func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
   var ps []*ParsedStmt
+  var dependencies []Dependency
 
   for _, x := range pr.Stmts {
     dp, err := deparse_raw_stmt(x)
+    perr(err)
+    json, err := pg_query.ParseToJSON(dp)
     perr(err)
     nps := &ParsedStmt{ 
       x, 
       false,
       "",
       dp, 
+      json,
       hash_string(dp), 
       UNKNOWN, 
       UNKNOWN_TYPE,
+      dependencies,
     }
-    set_stmt_type_and_name(x, nps)
+    hydrate_stmt_object(x, nps)
     ps = append(ps, nps) 
   }
 
@@ -546,10 +622,6 @@ func process_sql_files(ctx *Context) []*ParsedStmt {
   perr(err)
 
   return ps
-}
-
-func sort_statements_in_dependency_order(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
-  return stmts
 }
 
 func init_migration_schema(ctx *Context) {
@@ -829,7 +901,7 @@ func main() {
   ctx.db_tx = tx
 
   if strings.Compare(ctx.cmd, CLEAR_MIGRATIONS_CMD) == 0 {
-    log.Println("Clearning...");
+    log.Println("Clearing...");
     clear_migrations(ctx);
     ctx.cmd = MAKE_MIGRATIONS_CMD;
   }
@@ -847,8 +919,6 @@ func main() {
     log.Println("Processing SQL Files...")
     stmts := process_sql_files(ctx)
     set_stmt_status(ctx, stmts)
-
-    stmts = sort_statements_in_dependency_order(ctx, stmts)
 
     if !do_any_stmts_require_migration(ctx, stmts) {
       log.Fatal("No migrations required.")
@@ -877,6 +947,8 @@ func main() {
     log.Println("Executing migrations...")
     execute_migrations(ctx)
     log.Println("Migrations run successfully.")
+  } else {
+    log.Fatalf("Unknown command: %s\n", ctx.cmd)
   }
 
   perr(ctx.db_tx.Commit())
