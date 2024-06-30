@@ -67,8 +67,28 @@ const (
   MATERIALIZED_VIEW
   INDEX
   SET
+  ACCESS_METHOD
+  CAST
+  COLUMN
+  FOREIGN_SERVER
+  CONVERSION
+  DATABASE
   SEQUENCE
+  FOREIGN_DATA_WRAPPER
+  FOREIGN_TABLE
   SCHEMA
+  LARGE_OBJECT
+  OPERATOR
+  OPERATOR_CLASS
+  OPERATOR_FAMILY
+  ROUTINE
+  SERVER
+  STATISTICS
+  TEXT_SEARCH_CONFIGURATION
+  TEXT_SEARCH_DICTIONARY
+  TEXT_SEARCH_PARSER
+  TEXT_SEARCH_TEMPLATE
+  TRANSFORM
   FUNCTION
   PROCEDURE
   COMMENT
@@ -80,9 +100,12 @@ const (
   ALTER_POLICY
   ALTER_TABLE
   DO
+  EVENT_TRIGGER
   TRIGGER
   RULE
   CONSTRAINT
+  DOMAIN_CONSTRAINT
+  TABLE_CONSTRAINT
   TYPE
   DOMAIN
   COLUMN_TYPE // This is an ambiguous type. Could be a domain or a type.
@@ -251,6 +274,12 @@ func pg_typename_to_string(tn *pg_query.TypeName) string {
   return strings.Join(name, ".")
 }
 
+func pg_list_to_string(tn *pg_query.List) string {
+  items := tn.GetItems()
+
+  return pg_nodes_to_string(items)
+}
+
 func build_name(names ...string) string {
   return strings.Join(names, ".") 
 }
@@ -322,6 +351,118 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     case *pg_query.Node_CommonTableExpr: {
       query := n.CommonTableExpr.GetCtequery()
       hydrate_stmt_object(query, ps)
+    }
+
+    case *pg_query.Node_String_: {
+
+    }
+
+    case *pg_query.Node_List: {
+      items := n.List.GetItems()
+
+      for _, item := range items {
+        hydrate_stmt_object(item, ps)
+      }
+    }
+
+    case *pg_query.Node_CommentStmt: {
+      cmt := n.CommentStmt.GetObject()
+
+      name := pg_list_to_string(cmt.GetList())
+
+      switch n.CommentStmt.GetObjtype() {
+        case pg_query.ObjectType_OBJECT_ACCESS_METHOD:
+          append_dependency(ps, ACCESS_METHOD, name)
+        case pg_query.ObjectType_OBJECT_AGGREGATE:
+          append_dependency(ps, AGGREGATE, name)
+        case pg_query.ObjectType_OBJECT_CAST:
+          append_dependency(ps, CAST, name)
+        case pg_query.ObjectType_OBJECT_COLLATION:
+          append_dependency(ps, COLLATION, name)
+        case pg_query.ObjectType_OBJECT_COLUMN:
+          append_dependency(ps, COLUMN, name)
+        case pg_query.ObjectType_OBJECT_CONVERSION:
+          append_dependency(ps, CONVERSION, name)
+        case pg_query.ObjectType_OBJECT_TABCONSTRAINT:
+          append_dependency(ps, TABLE_CONSTRAINT, name)
+        case pg_query.ObjectType_OBJECT_DOMCONSTRAINT:
+          append_dependency(ps, DOMAIN_CONSTRAINT, name)
+        case pg_query.ObjectType_OBJECT_DATABASE:
+          append_dependency(ps, DATABASE, name)
+        case pg_query.ObjectType_OBJECT_DOMAIN:
+          append_dependency(ps, DOMAIN, name)
+        case pg_query.ObjectType_OBJECT_EVENT_TRIGGER:
+          append_dependency(ps, EVENT_TRIGGER, name)
+        case pg_query.ObjectType_OBJECT_EXTENSION:
+          append_dependency(ps, EXTENSION, name)
+        case pg_query.ObjectType_OBJECT_FDW:
+          append_dependency(ps, FOREIGN_DATA_WRAPPER, name)
+        case pg_query.ObjectType_OBJECT_FOREIGN_TABLE:
+          append_dependency(ps, FOREIGN_TABLE, name)
+        case pg_query.ObjectType_OBJECT_FUNCTION:
+          append_dependency(ps, FUNCTION, name)
+        case pg_query.ObjectType_OBJECT_INDEX:
+          append_dependency(ps, INDEX, name)
+        case pg_query.ObjectType_OBJECT_LANGUAGE:
+          append_dependency(ps, LANGUAGE, name)
+        case pg_query.ObjectType_OBJECT_LARGEOBJECT:
+          append_dependency(ps, LARGE_OBJECT, name)
+        case pg_query.ObjectType_OBJECT_MATVIEW:
+          append_dependency(ps, MATERIALIZED_VIEW, name)
+        case pg_query.ObjectType_OBJECT_OPERATOR:
+          append_dependency(ps, OPERATOR, name)
+        case pg_query.ObjectType_OBJECT_OPCLASS:
+          append_dependency(ps, OPERATOR_CLASS, name)
+        case pg_query.ObjectType_OBJECT_OPFAMILY:
+          append_dependency(ps, OPERATOR_FAMILY, name)
+        case pg_query.ObjectType_OBJECT_POLICY:
+          append_dependency(ps, POLICY, name)
+        case pg_query.ObjectType_OBJECT_PROCEDURE:
+          append_dependency(ps, PROCEDURE, name)
+        case pg_query.ObjectType_OBJECT_PUBLICATION:
+          append_dependency(ps, PUBLICATION, name)
+        case pg_query.ObjectType_OBJECT_ROLE:
+          append_dependency(ps, ROLE, name)
+        case pg_query.ObjectType_OBJECT_ROUTINE:
+          append_dependency(ps, ROUTINE, name)
+        case pg_query.ObjectType_OBJECT_RULE:
+          append_dependency(ps, RULE, name)
+        case pg_query.ObjectType_OBJECT_SCHEMA:
+          append_dependency(ps, SCHEMA, name)
+        case pg_query.ObjectType_OBJECT_SEQUENCE:
+          append_dependency(ps, SEQUENCE, name)
+        case pg_query.ObjectType_OBJECT_FOREIGN_SERVER:
+          append_dependency(ps, FOREIGN_SERVER, name)
+        case pg_query.ObjectType_OBJECT_STATISTIC_EXT:
+          append_dependency(ps, STATISTICS, name)
+        case pg_query.ObjectType_OBJECT_SUBSCRIPTION:
+          append_dependency(ps, SUBSCRIPTION, name)
+        case pg_query.ObjectType_OBJECT_TABLE:
+          append_dependency(ps, TABLE, name)
+        case pg_query.ObjectType_OBJECT_TABLESPACE:
+          append_dependency(ps, TABLESPACE, name)
+        case pg_query.ObjectType_OBJECT_TSCONFIGURATION:
+          append_dependency(ps, TEXT_SEARCH_CONFIGURATION, name)
+        case pg_query.ObjectType_OBJECT_TSDICTIONARY:
+          append_dependency(ps, TEXT_SEARCH_DICTIONARY, name)
+        case pg_query.ObjectType_OBJECT_TSPARSER:
+          append_dependency(ps, TEXT_SEARCH_PARSER, name)
+        case pg_query.ObjectType_OBJECT_TSTEMPLATE:
+          append_dependency(ps, TEXT_SEARCH_TEMPLATE, name)
+        case pg_query.ObjectType_OBJECT_TRANSFORM:
+          append_dependency(ps, TRANSFORM, name)
+        case pg_query.ObjectType_OBJECT_TRIGGER:
+          append_dependency(ps, TRIGGER, name)
+        case pg_query.ObjectType_OBJECT_TYPE:
+          append_dependency(ps, TYPE, name)
+        case pg_query.ObjectType_OBJECT_VIEW:
+          append_dependency(ps, VIEW, name)
+
+        default:
+          append_dependency(ps, UNKNOWN_TYPE, name)
+      }
+
+      hydrate_stmt_object(cmt, ps)
     }
 
     case *pg_query.Node_SelectStmt: {

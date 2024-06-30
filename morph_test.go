@@ -306,3 +306,25 @@ func TestWithDependency(t *testing.T) {
   });
  
 }
+
+func TestCommentDependency(t *testing.T) {
+  example := `
+    comment on table some_other_table is 'This is a comment';
+  `
+
+  t.Run("with dependency", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(example)
+    perr(e)
+    stmts := extract_stmts(ite_parsed)
+    ps := stmts[0]
+
+    correct := []Dependency{
+      { TABLE, "some_other_table" },
+    }
+
+    if !reflect.DeepEqual(correct, ps.dependencies) {
+      dependency_test_failed(t, ps.dependencies, correct) 
+    }
+  });
+ 
+}
