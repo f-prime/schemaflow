@@ -262,6 +262,7 @@ func hydrate_stmt_object(x *pg_query.RawStmt, ps *ParsedStmt) {
 
       relation := create_stmt.GetRelation()
       inher_rels := create_stmt.GetInhRelations()
+      tablespace := create_stmt.GetTablespacename()
       table_elts := create_stmt.GetTableElts()
 
       for _, column := range table_elts {
@@ -282,15 +283,32 @@ func hydrate_stmt_object(x *pg_query.RawStmt, ps *ParsedStmt) {
 
             if function_constraint != nil {
               fname := function_constraint.GetFuncname()
+              args := function_constraint.GetArgs()
               fname_string := pg_nodes_to_string(fname)
-              ps.dependencies = append(ps.dependencies, Dependency { FUNCTION, fname_string })
+
+              if fname_string == "nextval" {
+                if len(args) > 0 {
+                  sequence_name := args[0].GetAConst().GetSval().GetSval()
+                  ps.dependencies = append(ps.dependencies, Dependency { SEQUENCE, sequence_name })
+                }
+              } else {
+                ps.dependencies = append(ps.dependencies, Dependency { FUNCTION, fname_string })
+              }
             }
           }
 
           type_name := column_def.GetTypeName()
           type_name_string := pg_typename_to_string(type_name)
+
           if !strings.HasPrefix(type_name_string, "pg_catalog") {
             ps.dependencies = append(ps.dependencies, Dependency { COLUMN_TYPE, type_name_string })
+          }
+          
+          coll_clause := column_def.GetCollClause()
+          collname := coll_clause.GetCollname()
+
+          if collname != nil {
+            ps.dependencies = append(ps.dependencies, Dependency { COLLATION, pg_nodes_to_string(collname) })
           }
 
         } else if constraint != nil {
@@ -305,6 +323,10 @@ func hydrate_stmt_object(x *pg_query.RawStmt, ps *ParsedStmt) {
       for _, inher_rel := range inher_rels {
         rel_name := pg_rangevar_to_string(inher_rel.GetRangeVar())
         ps.dependencies = append(ps.dependencies, Dependency { TABLE, rel_name })
+      }
+
+      if len(tablespace) > 0 {
+        ps.dependencies = append(ps.dependencies, Dependency { TABLESPACE, tablespace })
       }
 
       schema_name := relation.GetSchemaname() 
