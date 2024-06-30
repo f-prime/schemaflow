@@ -251,252 +251,180 @@ func pg_typename_to_string(tn *pg_query.TypeName) string {
   return strings.Join(name, ".")
 }
 
-func hydrate_stmt_object(x *pg_query.RawStmt, ps *ParsedStmt) {
-  stmt := x.GetStmt()
+func build_name(names ...string) string {
+  return strings.Join(names, ".") 
+}
 
-  switch stmt.Node.(type) {
+func build_dependency(t StmtType, name string) Dependency {
+  return Dependency { t, name }
+}
+
+func append_dependency(ps *ParsedStmt, t StmtType, name string) {
+  if name == "" {
+    return
+  }
+
+  for _, d := range ps.dependencies {
+    if d.stmt_name == name && d.stmt_type == t {
+      return
+    }
+  }
+
+  ps.dependencies = append(ps.dependencies, build_dependency(t, name))
+}
+
+func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
+  if node == nil {
+    return
+  }
+
+  switch n := node.Node.(type) {
     case *pg_query.Node_CreateStmt: {
       ps.stmt_type = TABLE
 
-      create_stmt := stmt.GetCreateStmt()
+      relation := n.CreateStmt.GetRelation()
+      ps.name = pg_rangevar_to_string(relation)
 
-      relation := create_stmt.GetRelation()
-      inher_rels := create_stmt.GetInhRelations()
-      tablespace := create_stmt.GetTablespacename()
-      table_elts := create_stmt.GetTableElts()
+      append_dependency(ps, SCHEMA, relation.GetSchemaname())
 
-      for _, column := range table_elts {
-        constraint := column.GetConstraint()
-        column_def := column.GetColumnDef()
+      table_elts := n.CreateStmt.GetTableElts()
+      constraints := n.CreateStmt.GetConstraints()
+      inherited := n.CreateStmt.GetInhRelations()
+      tablespace := n.CreateStmt.GetTablespacename()
 
-        if column_def != nil {
-          constraints := column_def.GetConstraints()
+      append_dependency(ps, TABLESPACE, tablespace)
 
-          for _, constraint := range constraints {
-            c := constraint.GetConstraint()
-            fk_constraint := c.GetPktable()
-            function_constraint := c.GetRawExpr().GetFuncCall()
-
-            if fk_constraint != nil {
-              ps.dependencies = append(ps.dependencies, Dependency { TABLE, pg_rangevar_to_string(fk_constraint) })
-            }
-
-            if function_constraint != nil {
-              fname := function_constraint.GetFuncname()
-              args := function_constraint.GetArgs()
-              fname_string := pg_nodes_to_string(fname)
-
-              if fname_string == "nextval" {
-                if len(args) > 0 {
-                  sequence_name := args[0].GetAConst().GetSval().GetSval()
-                  ps.dependencies = append(ps.dependencies, Dependency { SEQUENCE, sequence_name })
-                }
-              } else {
-                ps.dependencies = append(ps.dependencies, Dependency { FUNCTION, fname_string })
-              }
-            }
-          }
-
-          type_name := column_def.GetTypeName()
-          type_name_string := pg_typename_to_string(type_name)
-
-          if !strings.HasPrefix(type_name_string, "pg_catalog") {
-            ps.dependencies = append(ps.dependencies, Dependency { COLUMN_TYPE, type_name_string })
-          }
-          
-          coll_clause := column_def.GetCollClause()
-          collname := coll_clause.GetCollname()
-
-          if collname != nil {
-            ps.dependencies = append(ps.dependencies, Dependency { COLLATION, pg_nodes_to_string(collname) })
-          }
-
-        } else if constraint != nil {
-          fk_constraint := constraint.GetPktable()
-
-          if fk_constraint != nil {
-            ps.dependencies = append(ps.dependencies, Dependency { TABLE, pg_rangevar_to_string(fk_constraint) })
-          }
-        }
+      for _, elt := range table_elts {
+        hydrate_stmt_object(elt, ps)
       }
 
-      for _, inher_rel := range inher_rels {
-        rel_name := pg_rangevar_to_string(inher_rel.GetRangeVar())
-        ps.dependencies = append(ps.dependencies, Dependency { TABLE, rel_name })
+      for _, constraint := range constraints {
+        hydrate_stmt_object(constraint, ps)
       }
 
-      if len(tablespace) > 0 {
-        ps.dependencies = append(ps.dependencies, Dependency { TABLESPACE, tablespace })
+      for _, inherited := range inherited {
+        hydrate_stmt_object(inherited, ps)
       }
-
-      schema_name := relation.GetSchemaname() 
-      
-      if len(schema_name) > 0 {
-        ps.dependencies = append(ps.dependencies, Dependency { SCHEMA, schema_name })
-      }
-
-      ps.name = pg_rangevar_to_string(relation) 
-    } 
-
-    case *pg_query.Node_CreateTableAsStmt: {
-      ps.stmt_type = MATERIALIZED_VIEW
-      into := stmt.GetCreateTableAsStmt().GetInto().GetRel()
-
-      schema_name := into.GetSchemaname()
-
-      ps.dependencies = append(ps.dependencies, Dependency { SCHEMA, schema_name })
-
-      ps.name = pg_rangevar_to_string(into) 
     }
-
 
     case *pg_query.Node_ViewStmt: {
-      ps.stmt_type = VIEW
+      schema_name := n.ViewStmt.View.GetSchemaname()
+      rel_name := n.ViewStmt.View.GetRelname()
+      ps.name = build_name(schema_name, rel_name)
 
-      view_stmt := stmt.GetViewStmt()
-      view := view_stmt.GetView()
+      if schema_name != "" {
+        append_dependency(ps, SCHEMA, schema_name)
+      }
 
-      schema_name := view.GetSchemaname()
+      hydrate_stmt_object(n.ViewStmt.Query, ps)
+    }
 
-      ps.dependencies = append(ps.dependencies, Dependency { SCHEMA, schema_name })
+    case *pg_query.Node_SelectStmt: {
+      targets := n.SelectStmt.GetTargetList()
+      from_clauses := n.SelectStmt.GetFromClause()
+      having_clause := n.SelectStmt.GetHavingClause()
 
-      ps.name = pg_rangevar_to_string(view)
-    } 
+      for _, target := range targets {
+        hydrate_stmt_object(target, ps)
+      }
 
-    case *pg_query.Node_IndexStmt: {
-      ps.stmt_type = INDEX
+      for _, from_clause := range from_clauses {
+        hydrate_stmt_object(from_clause, ps)
+      }
+
+      hydrate_stmt_object(having_clause, ps)
+    }
+
+    case *pg_query.Node_ResTarget: {
+      hydrate_stmt_object(n.ResTarget.GetVal(), ps)
+    }
+
+    case *pg_query.Node_ColumnRef: {
       
-      idx_stmt := stmt.GetIndexStmt()
-      idx_name := idx_stmt.GetIdxname()
-
-      ps.name = idx_name
     }
 
-    case *pg_query.Node_CreateSeqStmt: {
-      ps.stmt_type = SEQUENCE; 
-      ps.name = stmt.GetCreateSeqStmt().GetSequence().GetRelname()
+    case *pg_query.Node_TypeCast: {
+      type_name := n.TypeCast.GetTypeName()
+      name_as_string := pg_nodes_to_string(type_name.GetNames())
+
+      if !strings.HasPrefix(name_as_string, "pg_catalog") {
+        append_dependency(ps, COLUMN_TYPE, name_as_string)
+      }
     }
 
-    case *pg_query.Node_CreateSchemaStmt: {
-      ps.stmt_type = SCHEMA;
-      ps.name = stmt.GetCreateSchemaStmt().GetSchemaname()
+    case *pg_query.Node_RangeVar: {
+      name := pg_rangevar_to_string(n.RangeVar)
+      append_dependency(ps, TABLE, name)
     }
 
-    case *pg_query.Node_CreateFunctionStmt: {
-      ps.stmt_type = FUNCTION;
-      ps.name = pg_nodes_to_string(stmt.GetCreateFunctionStmt().GetFuncname())
+    case *pg_query.Node_FuncCall: {
+      name := pg_nodes_to_string(n.FuncCall.GetFuncname()) 
+      args := n.FuncCall.GetArgs()
+
+      if name == "nextval" {
+        if len(args) == 1 {
+          seq_name := args[0].GetAConst().GetSval()
+          append_dependency(ps, SEQUENCE, seq_name.GetSval())
+        }
+
+      } else {
+        append_dependency(ps, FUNCTION, name)
+        
+        for _, arg := range args {
+          hydrate_stmt_object(arg, ps)
+        }
+      }
     }
 
-    case *pg_query.Node_CreateTrigStmt: {
-      ps.stmt_type = TRIGGER;
-      ps.name = stmt.GetCreateTrigStmt().GetTrigname()
+    case *pg_query.Node_RangeSubselect: {
+      subquery := n.RangeSubselect.GetSubquery()
+      hydrate_stmt_object(subquery, ps)
     }
 
-    case *pg_query.Node_CreateDomainStmt: {
-      ps.stmt_type = DOMAIN;
-      ps.name = pg_nodes_to_string(stmt.GetCreateDomainStmt().GetDomainname())
+    case *pg_query.Node_ColumnDef: {
+      cd := n.ColumnDef
+      type_name := cd.GetTypeName()
+      names := type_name.GetNames()
+      column_type_name := pg_nodes_to_string(names)
+      constraints := cd.GetConstraints()
+
+      colc := cd.GetCollClause()
+
+      append_dependency(ps, COLLATION, pg_nodes_to_string(colc.GetCollname()))
+
+      if !strings.HasPrefix(column_type_name, "pg_catalog") {
+        append_dependency(ps, COLUMN_TYPE, column_type_name)
+      }
+
+      for _, constraint := range constraints {
+        hydrate_stmt_object(constraint, ps)
+      }
     }
 
-    case *pg_query.Node_CreateExtensionStmt: {
-      ps.stmt_type = EXTENSION;
-      ps.name = stmt.GetExecuteStmt().GetName()
+    case *pg_query.Node_Constraint: {
+      pktable := n.Constraint.GetPktable()  
+      pktable_name := pg_rangevar_to_string(pktable)
+      raw_expr := n.Constraint.GetRawExpr()
+
+      append_dependency(ps, TABLE, pktable_name)
+
+      hydrate_stmt_object(raw_expr, ps)
     }
 
-    case *pg_query.Node_CreateTableSpaceStmt: {
-      ps.stmt_type = TABLESPACE
-      ps.name = stmt.GetCreateTableSpaceStmt().GetTablespacename()
-    }
-
-    case *pg_query.Node_CreateRoleStmt: {
-      ps.stmt_type = ROLE
-      ps.name = stmt.GetCreateRoleStmt().GetRole()
-    }
-
-    case *pg_query.Node_CreatePolicyStmt: {
-      ps.stmt_type = POLICY
-      ps.name = stmt.GetCreatePolicyStmt().GetPolicyName()
-      ps.has_name = true;
-    }
-
-    case *pg_query.Node_CreatePublicationStmt: {
-      ps.stmt_type = PUBLICATION
-      ps.name = stmt.GetCreatePublicationStmt().GetPubname()
-    }
-
-    case *pg_query.Node_CreateSubscriptionStmt: {
-      ps.stmt_type = SUBSCRIPTION
-      ps.name = stmt.GetCreateSubscriptionStmt().GetSubname()
-    }
-
-    case *pg_query.Node_InsertStmt: {
-      ps.stmt_type = INSERT
-    }
-
-    case *pg_query.Node_VariableSetStmt: {
-      ps.stmt_type = SET
-      ps.name = stmt.GetVariableSetStmt().GetName()
-    }
-
-    case *pg_query.Node_DropStmt: {
-      ps.stmt_type = DROP
-    }
-
-    case *pg_query.Node_DropOwnedStmt: {
-      ps.stmt_type = DROP_OWNED
-    }
-
-    case *pg_query.Node_CommentStmt: {
-      ps.stmt_type = COMMENT
-    }
-
-    case *pg_query.Node_GrantStmt: {
-      ps.stmt_type = GRANT
-    }
-
-    case *pg_query.Node_GrantRoleStmt: {
-      ps.stmt_type = GRANT_ROLE
-    }
-
-    case *pg_query.Node_AlterTableStmt: {
-      ps.stmt_type = ALTER_TABLE
-    }
-
-    case *pg_query.Node_DoStmt: {
-      ps.stmt_type = DO
-    }
-
-    case *pg_query.Node_AlterPolicyStmt: {
-      ps.stmt_type = ALTER_POLICY   
-    }
-
-    case *pg_query.Node_CreateEnumStmt: {
-      ps.stmt_type = ENUM
-      ps.name = pg_nodes_to_string(stmt.GetCreateEnumStmt().GetTypeName())
-    }
-
-    case *pg_query.Node_CompositeTypeStmt: {
-      ps.stmt_type = TYPE
-
-      typevar := stmt.GetCompositeTypeStmt().GetTypevar()
-
-      ps.name = pg_rangevar_to_string(typevar)
-    }
-
-    case *pg_query.Node_UpdateStmt: {
-      ps.stmt_type = UPDATE    
-    }
-
-    case *pg_query.Node_AlterDefaultPrivilegesStmt: {
-      ps.stmt_type = ALTER_DEFAULT_PRIVILEGES
+    case *pg_query.Node_JoinExpr: {
+      je := n.JoinExpr
+      larg := je.GetLarg()
+      rarg := je.GetRarg()
+      hydrate_stmt_object(larg, ps)
+      hydrate_stmt_object(rarg, ps)
     }
 
     default: {
-      log.Printf("WARNING: Unknown stmt\nDEPARSED: %v\nJSON: %v\n", ps.deparsed, ps.json)
-      ps.stmt_type = UNKNOWN_TYPE
+      log.Fatalf("Unknown node type %v\n", node) 
     }
-
-    ps.has_name = len(ps.name) > 0
   }
+
+  ps.has_name = ps.name != ""
 }
 
 func get_current_version_of_stmt(ctx *Context, stmt *ParsedStmt) (*pg_query.RawStmt, error) {
@@ -602,7 +530,7 @@ func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
       UNKNOWN_TYPE,
       dependencies,
     }
-    hydrate_stmt_object(x, nps)
+    hydrate_stmt_object(x.GetStmt(), nps)
     ps = append(ps, nps) 
   }
 

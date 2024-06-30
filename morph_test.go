@@ -7,6 +7,45 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
+func dependency_test_failed(t *testing.T, deps any, correct any) {
+  t.Errorf("Dependencies error\n\nRECEIVED:  %v\nCORRECT:   %v", deps, correct) 
+}
+
+func TestViewDependency(t *testing.T) {
+  domain_example := `
+  create or replace view abc.some_view as 
+    select *, x::my_domain 
+    from 
+    a_cool_table, b_cool_table
+    join c_cool_table k on k.id=25 
+    left join lateral (
+      select * from d_cool_table
+    ) x on true
+    having some_other_function(d)
+  ;
+  `
+
+  t.Run("view dependency", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(domain_example)
+    perr(e)
+    stmts := extract_stmts(ite_parsed)
+    ps := stmts[0]
+
+    correct := make([]Dependency, 7)
+    correct[0] = Dependency{ SCHEMA, "abc" }
+    correct[1] = Dependency{ COLUMN_TYPE, "my_domain" }
+    correct[2] = Dependency{ TABLE, "a_cool_table" }
+    correct[3] = Dependency{ TABLE, "b_cool_table" }
+    correct[4] = Dependency{ TABLE, "c_cool_table" }
+    correct[5] = Dependency{ TABLE, "d_cool_table" }
+    correct[6] = Dependency{ FUNCTION, "some_other_function" }
+
+    if !reflect.DeepEqual(correct, ps.dependencies) {
+      dependency_test_failed(t, ps.dependencies, correct) 
+    }
+  });
+}
+
 func TestTableForeignKeyDependency(t *testing.T) {
   foreign_key_example := `
     CREATE TABLE child_table (
@@ -23,7 +62,7 @@ func TestTableForeignKeyDependency(t *testing.T) {
     correct[0] = Dependency{ TABLE, "parent_table" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -45,7 +84,7 @@ func TestTableInheritedDependency(t *testing.T) {
     correct[0] = Dependency{ TABLE, "parent_table" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -66,7 +105,7 @@ func TestTablePartitionDependency(t *testing.T) {
     correct[0] = Dependency{ TABLE, "parent_table" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -84,11 +123,11 @@ func TestTableFunctionDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := make([]Dependency, 2)
-    correct[0] = Dependency{ FUNCTION, "uuid_generate_v4" }
-    correct[1] = Dependency{ COLUMN_TYPE, "uuid" }
+    correct[0] = Dependency{ COLUMN_TYPE, "uuid" }
+    correct[1] = Dependency{ FUNCTION, "uuid_generate_v4" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -110,7 +149,7 @@ func TestTableSequenceDependency(t *testing.T) {
     correct[0] = Dependency{ SEQUENCE, "example_sequence" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -132,7 +171,7 @@ func TestTableCustomTypeDependency(t *testing.T) {
     correct[0] = Dependency{ COLUMN_TYPE, "positive_integer" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -151,11 +190,11 @@ func TestTableCollateDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := make([]Dependency, 2)
-    correct[0] = Dependency{ COLUMN_TYPE, "text" }
-    correct[1] = Dependency{ COLLATION, "romanian_phonebook" }
+    correct[0] = Dependency{ COLLATION, "romanian_phonebook" }
+    correct[1] = Dependency{ COLUMN_TYPE, "text" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -177,7 +216,7 @@ func TestTableSchemaDependency(t *testing.T) {
     correct[0] = Dependency{ SCHEMA, "my_schema" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
@@ -199,7 +238,7 @@ func TestTableTablespaceDependency(t *testing.T) {
     correct[0] = Dependency{ TABLESPACE, "example_tablespace" }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
-      t.Errorf("Table dependencies incorrect %v should be %v", ps.dependencies, correct) 
+      dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
 }
