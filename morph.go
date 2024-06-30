@@ -66,7 +66,7 @@ const (
   VIEW
   MATERIALIZED_VIEW
   INDEX
-  SET
+  VARIABLE
   ACCESS_METHOD
   CAST
   COLUMN
@@ -281,7 +281,15 @@ func pg_list_to_string(tn *pg_query.List) string {
 }
 
 func build_name(names ...string) string {
-  return strings.Join(names, ".") 
+  var cleaned_names []string
+
+  for _, name := range names {
+    if len(name) > 0 {
+      cleaned_names = append(cleaned_names, name)
+    }
+  }
+
+  return strings.Join(cleaned_names, ".")
 }
 
 func build_dependency(t StmtType, name string) Dependency {
@@ -300,6 +308,13 @@ func append_dependency(ps *ParsedStmt, t StmtType, name string) {
   }
 
   ps.dependencies = append(ps.dependencies, build_dependency(t, name))
+}
+
+func append_rangevar_dependency(ps *ParsedStmt, rv *pg_query.RangeVar) {
+  schema := rv.GetSchemaname()
+
+  append_dependency(ps, SCHEMA, schema)
+  append_dependency(ps, TABLE, pg_rangevar_to_string(rv))
 }
 
 func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
@@ -336,6 +351,17 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       }
     }
 
+    case *pg_query.Node_CreateTableAsStmt: {
+      rel := n.CreateTableAsStmt.GetInto().GetRel()  
+      query := n.CreateTableAsStmt.GetQuery()
+
+      ps.name = pg_rangevar_to_string(rel)
+
+      append_dependency(ps, SCHEMA, rel.GetSchemaname())
+
+      hydrate_stmt_object(query, ps)
+    }
+
     case *pg_query.Node_ViewStmt: {
       schema_name := n.ViewStmt.View.GetSchemaname()
       rel_name := n.ViewStmt.View.GetRelname()
@@ -351,6 +377,136 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     case *pg_query.Node_CommonTableExpr: {
       query := n.CommonTableExpr.GetCtequery()
       hydrate_stmt_object(query, ps)
+    }
+
+    case *pg_query.Node_VariableSetStmt: {
+      ps.stmt_type = VARIABLE 
+      ps.name = n.VariableSetStmt.GetName()
+      args := n.VariableSetStmt.GetArgs()
+
+      for _, arg := range args {
+        hydrate_stmt_object(arg, ps)
+      }
+    }
+
+    case *pg_query.Node_CreateSchemaStmt: {
+      ps.stmt_type = SCHEMA
+      ps.name = n.CreateSchemaStmt.GetSchemaname()
+    }
+
+    case *pg_query.Node_CreateFunctionStmt: {
+      func_name := pg_nodes_to_string(n.CreateFunctionStmt.GetFuncname())
+      rtype := pg_nodes_to_string(n.CreateFunctionStmt.GetReturnType().GetNames())
+
+      ps.stmt_type = FUNCTION
+      ps.name = func_name
+
+      append_dependency(ps, TYPE, rtype)
+
+      options := n.CreateFunctionStmt.GetOptions()
+
+      for _, option := range options {
+        hydrate_stmt_object(option, ps)
+      }
+    }
+
+    case *pg_query.Node_AccessPriv: {
+
+    }
+
+    case *pg_query.Node_RoleSpec: {
+      name := n.RoleSpec.GetRolename()
+      append_dependency(ps, ROLE, name)
+    }
+
+    case *pg_query.Node_GrantStmt: {
+      objs := n.GrantStmt.GetObjects()
+
+      privs := n.GrantStmt.GetPrivileges()
+      grantees := n.GrantStmt.GetGrantees()
+
+      for _, obj := range objs {
+        hydrate_stmt_object(obj, ps)
+      }
+
+      for _, priv := range privs {
+        hydrate_stmt_object(priv, ps)
+      }
+
+      for _, grantee := range grantees {
+        hydrate_stmt_object(grantee, ps)
+      }
+    }
+
+    case *pg_query.Node_SqlvalueFunction: {
+
+    }
+
+    case *pg_query.Node_DefElem: {
+       
+    }
+
+    case *pg_query.Node_CreateTrigStmt: {
+      rel := n.CreateTrigStmt.GetRelation()
+      ps.name = n.CreateTrigStmt.GetTrigname()
+      fname := pg_nodes_to_string(n.CreateTrigStmt.GetFuncname())
+      append_rangevar_dependency(ps, rel)
+      append_dependency(ps, FUNCTION, fname)
+    }
+
+    case *pg_query.Node_CreatePolicyStmt: {
+      ps.name = n.CreatePolicyStmt.GetPolicyName()
+      table := n.CreatePolicyStmt.GetTable()
+
+      roles := n.CreatePolicyStmt.GetRoles()
+      qual := n.CreatePolicyStmt.GetQual()
+
+      hydrate_stmt_object(qual, ps)
+
+      append_rangevar_dependency(ps, table)
+
+      for _, role := range roles {
+        hydrate_stmt_object(role, ps)
+      }
+    }
+
+    case *pg_query.Node_AlterTableCmd: {
+
+    }
+
+    case *pg_query.Node_AlterTableStmt: {
+      relation := n.AlterTableStmt.GetRelation()
+      schema_name := relation.GetSchemaname()
+      table := relation.GetRelname()
+
+      cmds := n.AlterTableStmt.GetCmds()
+
+      for _, cmd := range cmds {
+        hydrate_stmt_object(cmd, ps)
+      }
+
+      append_dependency(ps, SCHEMA, schema_name)
+      append_dependency(ps, TABLE, table)
+    }
+
+    case *pg_query.Node_IndexElem: {
+
+    }
+
+    case *pg_query.Node_IndexStmt: {
+      ps.name = n.IndexStmt.GetIdxname()
+      relation := n.IndexStmt.GetRelation()
+      append_dependency(ps, SCHEMA, relation.GetSchemaname())
+
+      for _, ip := range n.IndexStmt.GetIndexParams() {
+        hydrate_stmt_object(ip, ps)
+      }
+    }
+
+    case *pg_query.Node_DoStmt: {
+      for _, arg := range n.DoStmt.GetArgs() {
+        hydrate_stmt_object(arg, ps)
+      }
     }
 
     case *pg_query.Node_String_: {
@@ -527,8 +683,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_RangeVar: {
-      name := pg_rangevar_to_string(n.RangeVar)
-      append_dependency(ps, TABLE, name)
+      append_rangevar_dependency(ps, n.RangeVar)
     }
 
     case *pg_query.Node_FuncCall: {
