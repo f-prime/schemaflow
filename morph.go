@@ -71,6 +71,7 @@ const (
   CAST
   COLUMN
   FOREIGN_SERVER
+  CASE
   CONVERSION
   DATABASE
   SEQUENCE
@@ -317,8 +318,101 @@ func append_rangevar_dependency(ps *ParsedStmt, rv *pg_query.RangeVar) {
   append_dependency(ps, TABLE, pg_rangevar_to_string(rv))
 }
 
+func object_type_to_stmt_type(ot pg_query.ObjectType) StmtType {
+  switch ot {
+    case pg_query.ObjectType_OBJECT_ACCESS_METHOD:
+        return ACCESS_METHOD
+    case pg_query.ObjectType_OBJECT_AGGREGATE:
+        return AGGREGATE
+    case pg_query.ObjectType_OBJECT_CAST:
+        return CAST
+    case pg_query.ObjectType_OBJECT_COLLATION:
+        return COLLATION
+    case pg_query.ObjectType_OBJECT_COLUMN:
+        return COLUMN
+    case pg_query.ObjectType_OBJECT_CONVERSION:
+        return CONVERSION
+    case pg_query.ObjectType_OBJECT_TABCONSTRAINT:
+        return TABLE_CONSTRAINT
+    case pg_query.ObjectType_OBJECT_DOMCONSTRAINT:
+        return DOMAIN_CONSTRAINT
+    case pg_query.ObjectType_OBJECT_DATABASE:
+        return DATABASE
+    case pg_query.ObjectType_OBJECT_DOMAIN:
+        return DOMAIN
+    case pg_query.ObjectType_OBJECT_EVENT_TRIGGER:
+        return EVENT_TRIGGER
+    case pg_query.ObjectType_OBJECT_EXTENSION:
+        return EXTENSION
+    case pg_query.ObjectType_OBJECT_FDW:
+        return FOREIGN_DATA_WRAPPER
+    case pg_query.ObjectType_OBJECT_FOREIGN_TABLE:
+        return FOREIGN_TABLE
+    case pg_query.ObjectType_OBJECT_FUNCTION:
+        return FUNCTION
+    case pg_query.ObjectType_OBJECT_INDEX:
+        return INDEX
+    case pg_query.ObjectType_OBJECT_LANGUAGE:
+        return LANGUAGE
+    case pg_query.ObjectType_OBJECT_LARGEOBJECT:
+        return LARGE_OBJECT
+    case pg_query.ObjectType_OBJECT_MATVIEW:
+        return MATERIALIZED_VIEW
+    case pg_query.ObjectType_OBJECT_OPERATOR:
+        return OPERATOR
+    case pg_query.ObjectType_OBJECT_OPCLASS:
+        return OPERATOR_CLASS
+    case pg_query.ObjectType_OBJECT_OPFAMILY:
+        return OPERATOR_FAMILY
+    case pg_query.ObjectType_OBJECT_POLICY:
+        return POLICY
+    case pg_query.ObjectType_OBJECT_PROCEDURE:
+        return PROCEDURE
+    case pg_query.ObjectType_OBJECT_PUBLICATION:
+        return PUBLICATION
+    case pg_query.ObjectType_OBJECT_ROLE:
+        return ROLE
+    case pg_query.ObjectType_OBJECT_ROUTINE:
+        return ROUTINE
+    case pg_query.ObjectType_OBJECT_RULE:
+        return RULE
+    case pg_query.ObjectType_OBJECT_SCHEMA:
+        return SCHEMA
+    case pg_query.ObjectType_OBJECT_SEQUENCE:
+        return SEQUENCE
+    case pg_query.ObjectType_OBJECT_FOREIGN_SERVER:
+        return FOREIGN_SERVER
+    case pg_query.ObjectType_OBJECT_STATISTIC_EXT:
+        return STATISTICS
+    case pg_query.ObjectType_OBJECT_SUBSCRIPTION:
+        return SUBSCRIPTION
+    case pg_query.ObjectType_OBJECT_TABLE:
+        return TABLE
+    case pg_query.ObjectType_OBJECT_TABLESPACE:
+        return TABLESPACE
+    case pg_query.ObjectType_OBJECT_TSCONFIGURATION:
+        return TEXT_SEARCH_CONFIGURATION
+    case pg_query.ObjectType_OBJECT_TSDICTIONARY:
+        return TEXT_SEARCH_DICTIONARY
+    case pg_query.ObjectType_OBJECT_TSPARSER:
+        return TEXT_SEARCH_PARSER
+    case pg_query.ObjectType_OBJECT_TSTEMPLATE:
+        return TEXT_SEARCH_TEMPLATE
+    case pg_query.ObjectType_OBJECT_TRANSFORM:
+        return TRANSFORM
+    case pg_query.ObjectType_OBJECT_TRIGGER:
+        return TRIGGER
+    case pg_query.ObjectType_OBJECT_TYPE:
+        return TYPE
+    case pg_query.ObjectType_OBJECT_VIEW:
+        return VIEW
+    default:
+        return UNKNOWN_TYPE
+  }
+}
+
 func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
-  if node == nil {
+  if node == nil || node.GetNode() == nil {
     return
   }
 
@@ -328,6 +422,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
       relation := n.CreateStmt.GetRelation()
       ps.name = pg_rangevar_to_string(relation)
+      ps.stmt_type = TABLE
 
       append_dependency(ps, SCHEMA, relation.GetSchemaname())
 
@@ -356,6 +451,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       query := n.CreateTableAsStmt.GetQuery()
 
       ps.name = pg_rangevar_to_string(rel)
+      ps.stmt_type = MATERIALIZED_VIEW
 
       append_dependency(ps, SCHEMA, rel.GetSchemaname())
 
@@ -365,13 +461,86 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     case *pg_query.Node_ViewStmt: {
       schema_name := n.ViewStmt.View.GetSchemaname()
       rel_name := n.ViewStmt.View.GetRelname()
+
       ps.name = build_name(schema_name, rel_name)
+      ps.stmt_type = VIEW
 
       if schema_name != "" {
         append_dependency(ps, SCHEMA, schema_name)
       }
 
       hydrate_stmt_object(n.ViewStmt.Query, ps)
+    }
+
+    case *pg_query.Node_CaseWhen: {
+      cw := n.CaseWhen
+
+      expr := cw.GetExpr()
+      result := cw.GetResult()
+
+      hydrate_stmt_object(expr, ps)
+      hydrate_stmt_object(result, ps)
+    }
+
+    case *pg_query.Node_NullTest: {
+      arg := n.NullTest.GetArg()
+      hydrate_stmt_object(arg, ps)
+    }
+
+    case *pg_query.Node_CoalesceExpr: {
+      ce := n.CoalesceExpr
+      hydrate_stmt_object(ce.GetXpr(), ps)
+      for _, arg := range ce.GetArgs() {
+        hydrate_stmt_object(arg, ps)
+      }
+    }
+
+    case *pg_query.Node_MinMaxExpr: {
+      mme := n.MinMaxExpr
+      for _, arg := range mme.GetArgs() {
+        hydrate_stmt_object(arg, ps)
+      }
+
+      hydrate_stmt_object(mme.GetXpr(), ps)
+    }
+
+    case *pg_query.Node_RangeFunction: {
+      rf := n.RangeFunction
+
+      for _, cfl := range rf.GetColdeflist() {
+        hydrate_stmt_object(cfl, ps)
+      }
+
+      for _, fun := range rf.GetFunctions() {
+        hydrate_stmt_object(fun, ps)
+      }
+    }
+
+    case *pg_query.Node_SubLink: {
+      sl := n.SubLink 
+
+      hydrate_stmt_object(sl.GetTestexpr(), ps)
+      hydrate_stmt_object(sl.GetXpr(), ps)
+      hydrate_stmt_object(sl.GetSubselect(), ps)
+
+      for _, on := range sl.GetOperName() {
+        hydrate_stmt_object(on, ps)
+      }
+    }
+
+    case *pg_query.Node_CaseExpr: {
+      ps.stmt_type = CASE
+
+      ce := n.CaseExpr
+
+      dr := ce.GetDefresult()
+
+      hydrate_stmt_object(dr, ps)
+
+      for _, arg := range ce.GetArgs() {
+        hydrate_stmt_object(arg, ps)
+      }
+
     }
 
     case *pg_query.Node_CommonTableExpr: {
@@ -382,6 +551,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     case *pg_query.Node_VariableSetStmt: {
       ps.stmt_type = VARIABLE 
       ps.name = n.VariableSetStmt.GetName()
+
       args := n.VariableSetStmt.GetArgs()
 
       for _, arg := range args {
@@ -419,6 +589,51 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       append_dependency(ps, ROLE, name)
     }
 
+    case *pg_query.Node_CreateEnumStmt: {
+      enum := n.CreateEnumStmt
+
+      ps.stmt_type = ENUM
+      ps.name = pg_nodes_to_string(enum.GetTypeName())
+    }
+
+    case *pg_query.Node_CreateDomainStmt: {
+      dname := n.CreateDomainStmt.GetDomainname()
+      constraints := n.CreateDomainStmt.GetConstraints()
+
+      ps.stmt_type = DOMAIN
+      ps.name = pg_nodes_to_string(dname)
+
+      type_name := n.CreateDomainStmt.GetTypeName()
+
+      append_dependency(ps, TYPE, pg_typename_to_string(type_name))
+
+      for _, constraint := range constraints {
+        hydrate_stmt_object(constraint, ps)
+      }
+      
+    }
+
+    case *pg_query.Node_DropStmt: {
+      ps.stmt_type = DROP
+
+      ds := n.DropStmt 
+      ds.GetRemoveType()
+      for _, object := range ds.GetObjects() {
+        ln := pg_list_to_string(object.GetList())
+        append_dependency(ps, object_type_to_stmt_type(ds.GetRemoveType()), ln)
+      }
+    }
+
+    case *pg_query.Node_CreateExtensionStmt: {
+      ps.stmt_type = EXTENSION
+      ps.name = n.CreateExtensionStmt.GetExtname()
+    }
+
+    case *pg_query.Node_ObjectWithArgs: {
+      objname := n.ObjectWithArgs.GetObjname()
+      append_dependency(ps, FUNCTION, pg_nodes_to_string(objname))
+    }
+
     case *pg_query.Node_GrantStmt: {
       objs := n.GrantStmt.GetObjects()
 
@@ -448,7 +663,10 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_CreateTrigStmt: {
       rel := n.CreateTrigStmt.GetRelation()
+
       ps.name = n.CreateTrigStmt.GetTrigname()
+      ps.stmt_type = TRIGGER
+
       fname := pg_nodes_to_string(n.CreateTrigStmt.GetFuncname())
       append_rangevar_dependency(ps, rel)
       append_dependency(ps, FUNCTION, fname)
@@ -456,6 +674,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_CreatePolicyStmt: {
       ps.name = n.CreatePolicyStmt.GetPolicyName()
+      ps.stmt_type = POLICY
+
       table := n.CreatePolicyStmt.GetTable()
 
       roles := n.CreatePolicyStmt.GetRoles()
@@ -470,7 +690,40 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       }
     }
 
+    case *pg_query.Node_GrantRoleStmt: {
+      grs := n.GrantRoleStmt
+      roles := grs.GetGrantedRoles()
+      groles := grs.GetGranteeRoles()
+
+      for _, role := range roles {
+        hydrate_stmt_object(role, ps)
+      }
+
+      for _, grole := range groles {
+        hydrate_stmt_object(grole, ps)
+      }
+    }
+
     case *pg_query.Node_AlterTableCmd: {
+
+    }
+
+    case *pg_query.Node_AlterDefaultPrivilegesStmt: {
+      ps.stmt_type = ALTER_DEFAULT_PRIVILEGES
+      adps := n.AlterDefaultPrivilegesStmt
+      action := adps.GetAction()
+
+      grantees := action.GetGrantees()
+      privs := action.GetPrivileges()
+
+      for _, g := range grantees {
+        hydrate_stmt_object(g, ps)
+      }
+
+      for _, p := range privs {
+        hydrate_stmt_object(p, ps)
+      }
+
 
     }
 
@@ -495,6 +748,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_IndexStmt: {
       ps.name = n.IndexStmt.GetIdxname()
+      ps.stmt_type = INDEX
+
       relation := n.IndexStmt.GetRelation()
       append_dependency(ps, SCHEMA, relation.GetSchemaname())
 
@@ -521,102 +776,29 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       }
     }
 
+    case *pg_query.Node_CompositeTypeStmt: {
+      tv := n.CompositeTypeStmt.GetTypevar()
+      name := pg_rangevar_to_string(tv)
+
+      ps.name = name
+      ps.stmt_type = TYPE
+
+      append_dependency(ps, SCHEMA, tv.GetSchemaname())
+
+      for _, cd := range n.CompositeTypeStmt.GetColdeflist() {
+        hydrate_stmt_object(cd, ps)
+      }
+    }
+
     case *pg_query.Node_CommentStmt: {
       cmt := n.CommentStmt.GetObject()
 
       name := pg_list_to_string(cmt.GetList())
 
-      switch n.CommentStmt.GetObjtype() {
-        case pg_query.ObjectType_OBJECT_ACCESS_METHOD:
-          append_dependency(ps, ACCESS_METHOD, name)
-        case pg_query.ObjectType_OBJECT_AGGREGATE:
-          append_dependency(ps, AGGREGATE, name)
-        case pg_query.ObjectType_OBJECT_CAST:
-          append_dependency(ps, CAST, name)
-        case pg_query.ObjectType_OBJECT_COLLATION:
-          append_dependency(ps, COLLATION, name)
-        case pg_query.ObjectType_OBJECT_COLUMN:
-          append_dependency(ps, COLUMN, name)
-        case pg_query.ObjectType_OBJECT_CONVERSION:
-          append_dependency(ps, CONVERSION, name)
-        case pg_query.ObjectType_OBJECT_TABCONSTRAINT:
-          append_dependency(ps, TABLE_CONSTRAINT, name)
-        case pg_query.ObjectType_OBJECT_DOMCONSTRAINT:
-          append_dependency(ps, DOMAIN_CONSTRAINT, name)
-        case pg_query.ObjectType_OBJECT_DATABASE:
-          append_dependency(ps, DATABASE, name)
-        case pg_query.ObjectType_OBJECT_DOMAIN:
-          append_dependency(ps, DOMAIN, name)
-        case pg_query.ObjectType_OBJECT_EVENT_TRIGGER:
-          append_dependency(ps, EVENT_TRIGGER, name)
-        case pg_query.ObjectType_OBJECT_EXTENSION:
-          append_dependency(ps, EXTENSION, name)
-        case pg_query.ObjectType_OBJECT_FDW:
-          append_dependency(ps, FOREIGN_DATA_WRAPPER, name)
-        case pg_query.ObjectType_OBJECT_FOREIGN_TABLE:
-          append_dependency(ps, FOREIGN_TABLE, name)
-        case pg_query.ObjectType_OBJECT_FUNCTION:
-          append_dependency(ps, FUNCTION, name)
-        case pg_query.ObjectType_OBJECT_INDEX:
-          append_dependency(ps, INDEX, name)
-        case pg_query.ObjectType_OBJECT_LANGUAGE:
-          append_dependency(ps, LANGUAGE, name)
-        case pg_query.ObjectType_OBJECT_LARGEOBJECT:
-          append_dependency(ps, LARGE_OBJECT, name)
-        case pg_query.ObjectType_OBJECT_MATVIEW:
-          append_dependency(ps, MATERIALIZED_VIEW, name)
-        case pg_query.ObjectType_OBJECT_OPERATOR:
-          append_dependency(ps, OPERATOR, name)
-        case pg_query.ObjectType_OBJECT_OPCLASS:
-          append_dependency(ps, OPERATOR_CLASS, name)
-        case pg_query.ObjectType_OBJECT_OPFAMILY:
-          append_dependency(ps, OPERATOR_FAMILY, name)
-        case pg_query.ObjectType_OBJECT_POLICY:
-          append_dependency(ps, POLICY, name)
-        case pg_query.ObjectType_OBJECT_PROCEDURE:
-          append_dependency(ps, PROCEDURE, name)
-        case pg_query.ObjectType_OBJECT_PUBLICATION:
-          append_dependency(ps, PUBLICATION, name)
-        case pg_query.ObjectType_OBJECT_ROLE:
-          append_dependency(ps, ROLE, name)
-        case pg_query.ObjectType_OBJECT_ROUTINE:
-          append_dependency(ps, ROUTINE, name)
-        case pg_query.ObjectType_OBJECT_RULE:
-          append_dependency(ps, RULE, name)
-        case pg_query.ObjectType_OBJECT_SCHEMA:
-          append_dependency(ps, SCHEMA, name)
-        case pg_query.ObjectType_OBJECT_SEQUENCE:
-          append_dependency(ps, SEQUENCE, name)
-        case pg_query.ObjectType_OBJECT_FOREIGN_SERVER:
-          append_dependency(ps, FOREIGN_SERVER, name)
-        case pg_query.ObjectType_OBJECT_STATISTIC_EXT:
-          append_dependency(ps, STATISTICS, name)
-        case pg_query.ObjectType_OBJECT_SUBSCRIPTION:
-          append_dependency(ps, SUBSCRIPTION, name)
-        case pg_query.ObjectType_OBJECT_TABLE:
-          append_dependency(ps, TABLE, name)
-        case pg_query.ObjectType_OBJECT_TABLESPACE:
-          append_dependency(ps, TABLESPACE, name)
-        case pg_query.ObjectType_OBJECT_TSCONFIGURATION:
-          append_dependency(ps, TEXT_SEARCH_CONFIGURATION, name)
-        case pg_query.ObjectType_OBJECT_TSDICTIONARY:
-          append_dependency(ps, TEXT_SEARCH_DICTIONARY, name)
-        case pg_query.ObjectType_OBJECT_TSPARSER:
-          append_dependency(ps, TEXT_SEARCH_PARSER, name)
-        case pg_query.ObjectType_OBJECT_TSTEMPLATE:
-          append_dependency(ps, TEXT_SEARCH_TEMPLATE, name)
-        case pg_query.ObjectType_OBJECT_TRANSFORM:
-          append_dependency(ps, TRANSFORM, name)
-        case pg_query.ObjectType_OBJECT_TRIGGER:
-          append_dependency(ps, TRIGGER, name)
-        case pg_query.ObjectType_OBJECT_TYPE:
-          append_dependency(ps, TYPE, name)
-        case pg_query.ObjectType_OBJECT_VIEW:
-          append_dependency(ps, VIEW, name)
+      ps.name = n.CommentStmt.GetComment()
+      ps.stmt_type = COMMENT
 
-        default:
-          append_dependency(ps, UNKNOWN_TYPE, name)
-      }
+      append_dependency(ps, object_type_to_stmt_type(n.CommentStmt.GetObjtype()), name)
 
       hydrate_stmt_object(cmt, ps)
     }
