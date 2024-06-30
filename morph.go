@@ -319,10 +319,19 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       hydrate_stmt_object(n.ViewStmt.Query, ps)
     }
 
+    case *pg_query.Node_CommonTableExpr: {
+      query := n.CommonTableExpr.GetCtequery()
+      hydrate_stmt_object(query, ps)
+    }
+
     case *pg_query.Node_SelectStmt: {
       targets := n.SelectStmt.GetTargetList()
       from_clauses := n.SelectStmt.GetFromClause()
       having_clause := n.SelectStmt.GetHavingClause()
+      where_clause := n.SelectStmt.GetWhereClause()
+      with_clause := n.SelectStmt.GetWithClause()
+
+      hydrate_stmt_object(where_clause, ps)
 
       for _, target := range targets {
         hydrate_stmt_object(target, ps)
@@ -330,6 +339,10 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
       for _, from_clause := range from_clauses {
         hydrate_stmt_object(from_clause, ps)
+      }
+
+      for _, cte := range with_clause.GetCtes() {
+        hydrate_stmt_object(cte, ps)
       }
 
       hydrate_stmt_object(having_clause, ps)
@@ -341,6 +354,26 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_ColumnRef: {
       
+    }
+
+    case *pg_query.Node_BoolExpr: {
+      args := n.BoolExpr.GetArgs()
+
+      for _, arg := range args {
+        hydrate_stmt_object(arg, ps)
+      }
+    }
+
+    case *pg_query.Node_AExpr: {
+      lexpr := n.AExpr.GetLexpr()
+      rexpr := n.AExpr.GetRexpr()
+
+      hydrate_stmt_object(lexpr, ps)
+      hydrate_stmt_object(rexpr, ps)
+    }
+
+    case *pg_query.Node_AConst: {
+
     }
 
     case *pg_query.Node_TypeCast: {
@@ -419,7 +452,22 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       hydrate_stmt_object(rarg, ps)
     }
 
+    case *pg_query.Node_InsertStmt: {
+      relation := n.InsertStmt.GetRelation()
+      append_dependency(ps, TABLE, pg_rangevar_to_string(relation))
+      cols := n.InsertStmt.GetCols()
+
+      select_stmt := n.InsertStmt.GetSelectStmt()
+
+      for _, c := range cols {
+        hydrate_stmt_object(c, ps)
+      }
+
+      hydrate_stmt_object(select_stmt, ps)
+    }
+
     default: {
+      fmt.Printf("PARSE TREE: %v\n\n", ps.json)
       log.Fatalf("Unknown node type %v\n", node) 
     }
   }

@@ -31,14 +31,15 @@ func TestViewDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 7)
-    correct[0] = Dependency{ SCHEMA, "abc" }
-    correct[1] = Dependency{ COLUMN_TYPE, "my_domain" }
-    correct[2] = Dependency{ TABLE, "a_cool_table" }
-    correct[3] = Dependency{ TABLE, "b_cool_table" }
-    correct[4] = Dependency{ TABLE, "c_cool_table" }
-    correct[5] = Dependency{ TABLE, "d_cool_table" }
-    correct[6] = Dependency{ FUNCTION, "some_other_function" }
+    correct := []Dependency{
+      { SCHEMA, "abc" },
+      { COLUMN_TYPE, "my_domain" },
+      { TABLE, "a_cool_table" },
+      { TABLE, "b_cool_table" },
+      { TABLE, "c_cool_table" },
+      { TABLE, "d_cool_table" },
+      { FUNCTION, "some_other_function" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -58,8 +59,9 @@ func TestTableForeignKeyDependency(t *testing.T) {
     stmts := extract_stmts(fke_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ TABLE, "parent_table" }
+    correct := []Dependency {
+      { TABLE, "parent_table" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -80,8 +82,9 @@ func TestTableInheritedDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ TABLE, "parent_table" }
+    correct := []Dependency {
+      { TABLE, "parent_table" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -101,8 +104,9 @@ func TestTablePartitionDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ TABLE, "parent_table" }
+    correct := []Dependency{
+      { TABLE, "parent_table" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -122,9 +126,10 @@ func TestTableFunctionDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 2)
-    correct[0] = Dependency{ COLUMN_TYPE, "uuid" }
-    correct[1] = Dependency{ FUNCTION, "uuid_generate_v4" }
+    correct := []Dependency{
+      { COLUMN_TYPE, "uuid" },
+      { FUNCTION, "uuid_generate_v4" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -145,8 +150,9 @@ func TestTableSequenceDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ SEQUENCE, "example_sequence" }
+    correct := []Dependency{
+      { SEQUENCE, "example_sequence" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -167,8 +173,9 @@ func TestTableCustomTypeDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ COLUMN_TYPE, "positive_integer" }
+    correct := []Dependency{
+      { COLUMN_TYPE, "positive_integer" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -189,9 +196,10 @@ func TestTableCollateDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 2)
-    correct[0] = Dependency{ COLLATION, "romanian_phonebook" }
-    correct[1] = Dependency{ COLUMN_TYPE, "text" }
+    correct := []Dependency{
+      { COLLATION, "romanian_phonebook" },
+      { COLUMN_TYPE, "text" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -212,8 +220,9 @@ func TestTableSchemaDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ SCHEMA, "my_schema" }
+    correct := []Dependency{
+      { SCHEMA, "my_schema" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
@@ -234,11 +243,66 @@ func TestTableTablespaceDependency(t *testing.T) {
     stmts := extract_stmts(ite_parsed)
     ps := stmts[0]
 
-    correct := make([]Dependency, 1)
-    correct[0] = Dependency{ TABLESPACE, "example_tablespace" }
+    correct := []Dependency{
+      { TABLESPACE, "example_tablespace" },
+    }
 
     if !reflect.DeepEqual(correct, ps.dependencies) {
       dependency_test_failed(t, ps.dependencies, correct) 
     }
   });
+}
+
+func TestInsertDependency(t *testing.T) {
+  insert_example := `
+    insert into cc.abc (a, b, c) select x.a, x.b, x.c from some_other_table
+    where omg=123 and xyz=call_this_func(with_this_nested_call(123::MY_CUSTOM_NUMBER_TYPE))
+  `
+
+  t.Run("table insert dependency", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(insert_example)
+    perr(e)
+    stmts := extract_stmts(ite_parsed)
+    ps := stmts[0]
+
+    correct := []Dependency{
+      { TABLE, "cc.abc" },
+      { FUNCTION, "call_this_func" },
+      { FUNCTION, "with_this_nested_call" },
+      { COLUMN_TYPE, "my_custom_number_type" },
+      { TABLE, "some_other_table" },
+    }
+
+    if !reflect.DeepEqual(correct, ps.dependencies) {
+      dependency_test_failed(t, ps.dependencies, correct) 
+    }
+  });
+ 
+}
+
+func TestWithDependency(t *testing.T) {
+  example := `
+    with first as (select * from qvc), second as (select a::CT from abc) select my_func(25), * from first, second;
+  `
+
+  t.Run("with dependency", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(example)
+    perr(e)
+    stmts := extract_stmts(ite_parsed)
+    ps := stmts[0]
+
+    correct := []Dependency{
+      { FUNCTION, "my_func" },
+      { TABLE, "first" },
+      { TABLE, "second" },
+      { TABLE, "qvc" },
+      { COLUMN_TYPE, "ct" },
+      { TABLE, "abc" },
+    }
+
+    if !reflect.DeepEqual(correct, ps.dependencies) {
+      dependency_test_failed(t, ps.dependencies, correct) 
+    }
+  });
+ 
 }
