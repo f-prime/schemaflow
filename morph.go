@@ -61,62 +61,64 @@ const (
 
 type StmtType int
 
+// THE ORDER OF THIS ENUM IS THE SORT BUCKET PRIORITY ORDER
 const (
-  TABLE StmtType = iota
-  VIEW
-  MATERIALIZED_VIEW
-  INDEX
+  DATABASE StmtType = iota
+  SERVER
+  SCHEMA 
+  EXTENSION
+  USER
+  ROLE
   VARIABLE
-  ACCESS_METHOD
   CAST
-  COLUMN
+  ACCESS_METHOD
   FOREIGN_SERVER
-  CASE
-  CONVERSION
-  DATABASE
-  SEQUENCE
-  FOREIGN_DATA_WRAPPER
-  FOREIGN_TABLE
-  SCHEMA
-  LARGE_OBJECT
   OPERATOR
   OPERATOR_CLASS
   OPERATOR_FAMILY
-  ROUTINE
-  SERVER
   STATISTICS
   TEXT_SEARCH_CONFIGURATION
   TEXT_SEARCH_DICTIONARY
   TEXT_SEARCH_PARSER
   TEXT_SEARCH_TEMPLATE
-  TRANSFORM
   FUNCTION
+  DOMAIN
+  DOMAIN_CONSTRAINT
+  TYPE
+  COLUMN_TYPE // This is an ambiguous type. Could be a domain or a type.
+  AGGREGATE
+  COLLATION
+  LANGUAGE
+  ENUM
+
+  FOREIGN_DATA_WRAPPER
+  FOREIGN_TABLE
+  TABLE 
+  VIEW
+  MATERIALIZED_VIEW
+  INDEX
+  COLUMN
+  CASE
+  CONVERSION
+  SEQUENCE
+  LARGE_OBJECT
+  ROUTINE
+  TRANSFORM
+  SELECT
   PROCEDURE
   COMMENT
   GRANT
   GRANT_ROLE
-  ENUM
   UPDATE
   ALTER_DEFAULT_PRIVILEGES
   ALTER_POLICY
   ALTER_TABLE
-  DO
   EVENT_TRIGGER
   TRIGGER
   RULE
   CONSTRAINT
-  DOMAIN_CONSTRAINT
   TABLE_CONSTRAINT
-  TYPE
-  DOMAIN
-  COLUMN_TYPE // This is an ambiguous type. Could be a domain or a type.
-  AGGREGATE
-  COLLATION
-  EXTENSION
-  LANGUAGE
   TABLESPACE
-  ROLE
-  USER
   GROUP
   POLICY
   PUBLICATION
@@ -124,6 +126,7 @@ const (
   INSERT
   DROP_OWNED
   DROP
+  DO
   UNKNOWN_TYPE
 )
 
@@ -155,6 +158,7 @@ type ParsedStmt struct {
   has_name bool
   name string
   deparsed string
+  sort_priority int
   json string
   hash string
   status StmtStatus
@@ -635,6 +639,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_GrantStmt: {
+      ps.stmt_type = GRANT
+
       objs := n.GrantStmt.GetObjects()
 
       privs := n.GrantStmt.GetPrivileges()
@@ -691,6 +697,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_GrantRoleStmt: {
+      ps.stmt_type = GRANT
+
       grs := n.GrantRoleStmt
       roles := grs.GetGrantedRoles()
       groles := grs.GetGranteeRoles()
@@ -728,6 +736,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_AlterTableStmt: {
+      ps.stmt_type = ALTER_TABLE
+
       relation := n.AlterTableStmt.GetRelation()
       schema_name := relation.GetSchemaname()
       table := relation.GetRelname()
@@ -759,9 +769,12 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_DoStmt: {
+      ps.stmt_type = DO
+
       for _, arg := range n.DoStmt.GetArgs() {
         hydrate_stmt_object(arg, ps)
       }
+
     }
 
     case *pg_query.Node_String_: {
@@ -804,6 +817,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_SelectStmt: {
+      ps.stmt_type = SELECT
+
       targets := n.SelectStmt.GetTargetList()
       from_clauses := n.SelectStmt.GetFromClause()
       having_clause := n.SelectStmt.GetHavingClause()
@@ -932,7 +947,10 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_InsertStmt: {
       relation := n.InsertStmt.GetRelation()
+
+      append_dependency(ps, SCHEMA, relation.GetSchemaname())
       append_dependency(ps, TABLE, pg_rangevar_to_string(relation))
+
       cols := n.InsertStmt.GetCols()
 
       select_stmt := n.InsertStmt.GetSelectStmt()
@@ -951,6 +969,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
   }
 
   ps.has_name = ps.name != ""
+  ps.sort_priority = int(ps.stmt_type)
 }
 
 func get_current_version_of_stmt(ctx *Context, stmt *ParsedStmt) (*pg_query.RawStmt, error) {
@@ -1050,6 +1069,7 @@ func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
       false,
       "",
       dp, 
+      0,
       json,
       hash_string(dp), 
       UNKNOWN, 
@@ -1066,6 +1086,16 @@ func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
 func parse_sql(code string) (*pg_query.ParseResult, error) {
   pr, err := pg_query.Parse(code) 
   return pr, err
+}
+
+func sort_stmts_by_priority(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
+  sorted_ps := make([]*ParsedStmt, 0)
+
+  for _, s := range stmts {
+    fmt.Printf("\n\n-----\n%v\nNAME: %s\nDEPENDS ON: %v\n\n", s.deparsed, s.name, s.dependencies)
+  }
+
+  return sorted_ps
 }
 
 func process_sql_files(ctx *Context) []*ParsedStmt {
@@ -1395,6 +1425,8 @@ func main() {
     log.Println("Processing SQL Files...")
     stmts := process_sql_files(ctx)
     set_stmt_status(ctx, stmts)
+
+    stmts = sort_stmts_by_priority(ctx, stmts)
 
     if !do_any_stmts_require_migration(ctx, stmts) {
       log.Fatal("No migrations required.")
