@@ -556,6 +556,7 @@ func process_sql_files(ctx *Context) []*ParsedStmt {
   })
 
 
+  fmt.Println("Hydrating dependencies...");
   hydrate_dependencies(ps)
 
   perr(err)
@@ -691,6 +692,7 @@ func verify_all_migration_files(ctx *Context) {
 
 func is_stmt_hash_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
   r, e := ctx.db.Query("select * from morph.statements where stmt_hash=$1", stmt.hash)
+  defer r.Close()
   perr(e)
   return r.Next()
 }
@@ -701,6 +703,7 @@ func is_stmt_name_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
   }
 
   r, e := ctx.db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.name, stmt.stmt_type);
+  defer r.Close()
   perr(e)
   return r.Next()
 }
@@ -795,8 +798,8 @@ func clear_removed_statements_from_db(ctx *Context, stmts []*ParsedStmt) {
   var hash string
   
   query, err := ctx.db.Query("select stmt_hash from morph.statements")
-  perr(err)
   defer query.Close()
+  perr(err)
 
   for query.Next() {
     perr(query.Scan(&hash))
@@ -811,7 +814,7 @@ func clear_removed_statements_from_db(ctx *Context, stmts []*ParsedStmt) {
     }
 
     if !found {
-      log.Printf("Removing %s\n", hash);
+      log.Printf("Removing Statement with hash %s\n", hash);
       ctx.db_tx.Exec("delete from morph.statements where stmt_hash=$1", hash)
     }
   }
@@ -1542,8 +1545,11 @@ func main() {
 
     log.Println("Processing SQL Files...")
     stmts := process_sql_files(ctx)
+
+    log.Println("Setting statuses...")
     set_stmt_status(ctx, stmts)
 
+    log.Println("Sorting statements...")
     stmts = sort_stmts_by_priority(stmts)
 
     if !do_any_stmts_require_migration(ctx, stmts) {
