@@ -32,17 +32,23 @@ func TestViewDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { SCHEMA, "abc" },
-      { COLUMN_TYPE, "my_domain" },
-      { TABLE, "a_cool_table" },
-      { TABLE, "b_cool_table" },
-      { TABLE, "c_cool_table" },
-      { TABLE, "d_cool_table" },
-      { FUNCTION, "some_other_function" },
+      *build_dependency(SCHEMA, "abc" ),
+      *build_dependency(COLUMN_TYPE, "my_domain"),
+      *build_dependency(TABLE, "a_cool_table"),
+      *build_dependency(TABLE, "b_cool_table"),
+      *build_dependency(TABLE, "c_cool_table"),
+      *build_dependency(TABLE, "d_cool_table"),
+      *build_dependency(FUNCTION, "some_other_function" ),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -60,11 +66,18 @@ func TestTableForeignKeyDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency {
-      { TABLE, "parent_table" },
+      *build_dependency(COLUMN_TYPE, "int4" ),
+      *build_dependency(TABLE, "parent_table" ),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -83,11 +96,18 @@ func TestTableInheritedDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency {
-      { TABLE, "parent_table" },
+      *build_dependency(COLUMN_TYPE, "int4"),
+      *build_dependency(TABLE, "parent_table"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -105,11 +125,17 @@ func TestTablePartitionDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { TABLE, "parent_table" },
+      *build_dependency(TABLE, "parent_table"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -127,12 +153,18 @@ func TestTableFunctionDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { COLUMN_TYPE, "uuid" },
-      { FUNCTION, "uuid_generate_v4" },
+      *build_dependency(COLUMN_TYPE, "uuid"),
+      *build_dependency(FUNCTION, "uuid_generate_v4"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -151,11 +183,18 @@ func TestTableSequenceDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { SEQUENCE, "example_sequence" },
+      *build_dependency(COLUMN_TYPE, "int4"),
+      *build_dependency(SEQUENCE, "example_sequence"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -174,11 +213,17 @@ func TestTableCustomTypeDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { COLUMN_TYPE, "positive_integer" },
+      *build_dependency(COLUMN_TYPE, "positive_integer"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -197,12 +242,18 @@ func TestTableCollateDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { COLLATION, "romanian_phonebook" },
-      { COLUMN_TYPE, "text" },
+      *build_dependency(COLLATION, "romanian_phonebook"),
+      *build_dependency(COLUMN_TYPE, "text"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -221,11 +272,18 @@ func TestTableSchemaDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { SCHEMA, "my_schema" },
+      *build_dependency(SCHEMA, "my_schema"),
+      *build_dependency(COLUMN_TYPE, "int4"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -244,11 +302,18 @@ func TestTableTablespaceDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { TABLESPACE, "example_tablespace" },
+      *build_dependency(TABLESPACE, "example_tablespace"),
+      *build_dependency(COLUMN_TYPE, "int4"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
 }
@@ -266,15 +331,22 @@ func TestInsertDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { TABLE, "cc.abc" },
-      { FUNCTION, "call_this_func" },
-      { FUNCTION, "with_this_nested_call" },
-      { COLUMN_TYPE, "my_custom_number_type" },
-      { TABLE, "some_other_table" },
+      *build_dependency(SCHEMA, "cc"),
+      *build_dependency(TABLE, "abc"),
+      *build_dependency(FUNCTION, "call_this_func"),
+      *build_dependency(FUNCTION, "with_this_nested_call"),
+      *build_dependency(COLUMN_TYPE, "my_custom_number_type"),
+      *build_dependency(TABLE, "some_other_table"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
  
@@ -292,16 +364,22 @@ func TestWithDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { FUNCTION, "my_func" },
-      { TABLE, "first" },
-      { TABLE, "second" },
-      { TABLE, "qvc" },
-      { COLUMN_TYPE, "ct" },
-      { TABLE, "abc" },
+      *build_dependency(FUNCTION, "my_func"),
+      *build_dependency(TABLE, "first"),
+      *build_dependency(TABLE, "second"),
+      *build_dependency(TABLE, "qvc"),
+      *build_dependency(COLUMN_TYPE, "ct"),
+      *build_dependency(TABLE, "abc"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
  
@@ -319,11 +397,17 @@ func TestCommentDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      { TABLE, "some_other_table" },
+      *build_dependency(TABLE, "some_other_table"),
     }
 
-    if !reflect.DeepEqual(correct, ps.dependencies) {
-      dependency_test_failed(t, ps.dependencies, correct) 
+    var checked []Dependency
+
+    for _, c := range ps.dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      dependency_test_failed(t, checked, correct) 
     }
   });
  

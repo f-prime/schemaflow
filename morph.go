@@ -151,6 +151,7 @@ type Context struct {
 type Dependency struct {
   stmt_type StmtType
   stmt_name string
+  dependency *ParsedStmt
 }
 
 type ParsedStmt struct {
@@ -163,7 +164,8 @@ type ParsedStmt struct {
   hash string
   status StmtStatus
   stmt_type StmtType
-  dependencies []Dependency
+  dependencies []*Dependency
+  handled bool
 }
 
 func perr(e error) {
@@ -240,23 +242,29 @@ func deparse_raw_stmt(x *pg_query.RawStmt) (string, error) {
 }
 
 func pg_nodes_to_string(nodes []*pg_query.Node) string {
-  var name []string 
-
-  for _, node := range nodes {
-    name = append(name, node.GetString_().Sval)
+  if len(nodes) == 0 {
+    return ""
   }
 
-  return strings.Join(name, ".")
+  return nodes[len(nodes) - 1].GetString_().Sval
+
+  //var name []string 
+
+  //for _, node := range nodes {
+  //  name = append(name, node.GetString_().Sval)
+  //}
+
+  //return strings.Join(name, ".")
 }
 
 func pg_rangevar_to_string(rv *pg_query.RangeVar) string {
-  sn := rv.GetSchemaname()
+  //sn := rv.GetSchemaname()
 
-  if len(sn) == 0 {
-    return rv.GetRelname()
-  }
+  //if len(sn) == 0 {
+  //  return rv.GetRelname()
+  //}
 
-  return sn + "." + rv.GetRelname()
+  return rv.GetRelname()
 }
 
 func pg_typename_to_string(tn *pg_query.TypeName) string {
@@ -297,8 +305,8 @@ func build_name(names ...string) string {
   return strings.Join(cleaned_names, ".")
 }
 
-func build_dependency(t StmtType, name string) Dependency {
-  return Dependency { t, name }
+func build_dependency(t StmtType, name string) *Dependency {
+  return &Dependency { t, name, nil }
 }
 
 func append_dependency(ps *ParsedStmt, t StmtType, name string) {
@@ -320,6 +328,504 @@ func append_rangevar_dependency(ps *ParsedStmt, rv *pg_query.RangeVar) {
 
   append_dependency(ps, SCHEMA, schema)
   append_dependency(ps, TABLE, pg_rangevar_to_string(rv))
+}
+
+func get_current_version_of_stmt(ctx *Context, stmt *ParsedStmt) (*pg_query.RawStmt, error) {
+  if stmt.has_name {
+    var code string
+    err := ctx.db.QueryRow("select stmt from morph.statements where stmt_type=$1 and stmt_name=$2", stmt.stmt_type, stmt.name).Scan(&code); 
+    if err != nil {
+      return nil, err 
+    }
+
+    result, err2 := pg_query.Parse(code)
+
+    if err2 != nil {
+      return nil, err2 
+    }
+
+    stmts := result.GetStmts()
+
+    if len(stmts) == 0 {
+      return nil, errors.New("Statements array is empty.")
+    }
+
+    return result.GetStmts()[0], nil
+  }
+
+  return nil, errors.New(fmt.Sprintf("Could not get current version of statement. %v\n", stmt));
+}
+
+func write_sql_stmt_to_migration_file(ctx *Context, stmt string, add_migration_required_line bool) {
+  if add_migration_required_line {
+    ctx.migration_file.WriteString(MIGRATION_REQUIRED + "\n")
+  }
+
+  if !strings.HasSuffix(stmt, ";") {
+    stmt += ";"
+  }
+
+  ctx.migration_file.WriteString(stmt + "\n")
+}
+
+func write_migration_for_stmt(ctx *Context, stmt *ParsedStmt) {
+  switch stmt.stmt_type {
+    case FUNCTION: {
+      drop_fn := fmt.Sprintf("DROP FUNCTION IF EXISTS %s", stmt.name)
+      write_sql_stmt_to_migration_file(ctx, drop_fn, false)
+      write_sql_stmt_to_migration_file(ctx, stmt.deparsed, false)
+    }
+
+    //case TABLE: {
+    //  create_tbl_stmt := stmt.stmt.GetStmt().GetCreateStmt()
+    //  cv, e := get_current_version_of_stmt(ctx, stmt)
+
+    //  fmt.Printf("ctx: %v %v\n", cv, e)
+
+    //  for _, col := range create_tbl_stmt.TableElts {
+    //    c := col.GetColumnDef();
+    //    fmt.Printf("c: %v\n", c)
+    //  }
+    //  panic("ASD")
+    //}
+
+    default: {
+      cv, e := get_current_version_of_stmt(ctx, stmt)
+
+      if e != nil {
+        write_sql_stmt_to_migration_file(ctx, stmt.deparsed, true)
+      } else {
+        deparsed, err := deparse_raw_stmt(cv)
+        perr(err)
+        block := fmt.Sprintf(`/*
+%s
+
+Currently:
+%s
+
+Changed to:
+%s
+*/
+`, MIGRATION_REQUIRED, deparsed, stmt.deparsed) 
+        ctx.migration_file.WriteString(block)
+      }
+    }
+  }
+}
+
+func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
+  var ps []*ParsedStmt
+  dependencies := make([]*Dependency, 0)
+
+  for _, x := range pr.Stmts {
+    dp, err := deparse_raw_stmt(x)
+    perr(err)
+    json, err := pg_query.ParseToJSON(dp)
+    perr(err)
+    nps := &ParsedStmt{ 
+      x, 
+      false,
+      "",
+      dp, 
+      0,
+      json,
+      hash_string(dp), 
+      UNKNOWN, 
+      UNKNOWN_TYPE,
+      dependencies,
+      false,
+    }
+    hydrate_stmt_object(x.GetStmt(), nps)
+    ps = append(ps, nps) 
+  }
+
+  return ps
+}
+
+func parse_sql(code string) (*pg_query.ParseResult, error) {
+  pr, err := pg_query.Parse(code) 
+  return pr, err
+}
+
+func unroll_statement_dependencies(stmt *ParsedStmt, stmts []*ParsedStmt) []*ParsedStmt {
+  unrolled := make([]*ParsedStmt, 0) 
+
+  if stmt.handled {
+    return unrolled
+  }
+
+  if stmt == nil {
+    return unrolled
+  }
+
+  for _, dep := range stmt.dependencies {
+    unrolled = append(unrolled, unroll_statement_dependencies(dep.dependency, stmts)...) 
+  }
+
+  stmt.handled = true
+  unrolled = append(unrolled, stmt)
+
+  return unrolled
+}
+
+func sort_stmts_by_priority(stmts []*ParsedStmt) []*ParsedStmt {
+  sorted_stmts := make([]*ParsedStmt, 0)
+
+  for _, sch := range stmts {
+    if sch.stmt_type == SCHEMA {
+      sorted_stmts = append(sorted_stmts, sch)
+      sch.handled = true
+    }
+  }
+
+  for _, ext := range stmts {
+    if ext.stmt_type == EXTENSION {
+      sorted_stmts = append(sorted_stmts, ext)
+      ext.handled = true
+    }
+  }
+
+  for _, s := range stmts {
+    if !s.handled {
+      sorted_stmts = append(sorted_stmts, unroll_statement_dependencies(s, stmts)...)
+    }
+  }
+
+  return sorted_stmts
+}
+
+func hydrate_dependencies(stmts []*ParsedStmt) {
+  for _, p1 := range stmts {
+    var valid_deps []*Dependency
+    for _, dep := range p1.dependencies {
+      for _, p2 := range stmts {
+        if p2.name == dep.stmt_name {
+          if p2.stmt_type == dep.stmt_type {
+            dep.dependency = p2
+            break
+          } else if p2.stmt_type == COLUMN_TYPE {
+            if dep.stmt_type == DOMAIN || dep.stmt_type == TYPE || dep.stmt_type == ENUM {
+              dep.dependency = p2
+              break
+            }
+          } else if dep.stmt_type == COLUMN_TYPE {
+            if p2.stmt_type == DOMAIN || p2.stmt_type == TYPE || p2.stmt_type == ENUM {
+              dep.dependency = p2
+              break
+            }
+          }
+        }
+      }
+
+      if dep.dependency != nil {
+        valid_deps = append(valid_deps, dep)
+      }
+    }
+
+    p1.dependencies = valid_deps
+  }
+}
+
+func process_sql_files(ctx *Context) []*ParsedStmt {
+  var ps []*ParsedStmt
+
+  err := filepath.Walk(ctx.sql_path, func(path string, info fs.FileInfo, err error) error {
+    perr(err)
+
+    if !strings.HasSuffix(info.Name(), ".sql") {
+      return nil
+    }
+
+    log.Printf("Processing file %s\n", path)
+
+    fdata, err := os.ReadFile(path)
+
+    perr(err)
+
+    parsed_file, parse_err := parse_sql(string(fdata))
+
+    if parse_err != nil {
+      log.Panicf("Syntax Error in %v:\n\n %v\n", path, parse_err)
+    }
+
+    extracted := extract_stmts(parsed_file)
+
+    ps = append(ps, extracted...)
+
+    return nil
+  })
+
+
+  hydrate_dependencies(ps)
+
+  perr(err)
+
+  return ps
+}
+
+func init_migration_schema(ctx *Context) {
+  _, e := ctx.db.Query(MIGRATION_SCHEMA) 
+  perr(e)
+}
+
+func init_migrations_folder(ctx *Context) {
+  _, err := os.Stat(MIGRATION_FOLDER)
+  if os.IsNotExist(err) {
+    os.Mkdir("migrations", os.FileMode(0777))
+  }
+}
+
+func hash_string(s string) string {
+  h := sha1.New()
+  h.Write([]byte(s))
+  r := h.Sum(nil)
+  return hex.EncodeToString(r)
+}
+
+func hash_file(p string) string {
+  data, e := os.ReadFile(p)
+  perr(e)
+  sdata := string(data)
+  return hash_string(sdata) 
+}
+
+func execute_sql_file(ctx *Context, fname string) error {
+  fd, e := os.ReadFile(fname)
+  perr(e)
+
+  _, e = ctx.db_tx.Exec(string(fd))
+  return e
+}
+
+func mark_migration_as_executed(ctx *Context, fname string) error {
+  _, e := ctx.db_tx.Exec("insert into morph.migrations (file_name, file_hash) values ($1, $2)", fname, hash_file(fname)) 
+  return e
+}
+
+func does_migration_with_file_name_exist_in_db(ctx *Context, file_name string) bool {
+  r, e := ctx.db.Query("select true from morph.migrations where file_name=$1", file_name)
+  perr(e)
+  return r.Next()
+}
+
+func does_migration_with_hash_exist_in_db(ctx *Context, hash string) bool {
+  r, e := ctx.db.Query("select true from morph.migrations where file_hash=$1", hash)
+  perr(e)
+  return r.Next()
+}
+
+func get_all_executed_migration_files(ctx *Context) []string {
+  var files []string
+
+  for _, f := range list_all_files_in_path(MIGRATION_FOLDER) {
+    if does_migration_with_file_name_exist_in_db(ctx, f) {
+      files = append(files, f) 
+    }
+  }
+
+  return files
+}
+
+func extract_number_from_migration_file_name(fname string) int {
+  fname = strings.ReplaceAll(fname, MIGRATION_FOLDER + "/", "")
+  fi, e1 := strconv.Atoi(strings.Split(fname, ".")[0])
+  perr(e1)
+
+  return fi
+}
+
+func get_all_unexecuted_migration_files(ctx *Context) []string {
+  var files []string
+
+  for _, f := range list_all_files_in_path(MIGRATION_FOLDER) {
+    if !does_migration_with_file_name_exist_in_db(ctx, f) {
+      files = append(files, f) 
+    }
+  }
+
+  sort.Slice(files, func(i int, j int) bool {
+    fi := extract_number_from_migration_file_name(files[i])
+    fj := extract_number_from_migration_file_name(files[j])
+
+    return fj > fi
+  });
+
+  return files
+}
+
+func is_migration_resolved(ctx *Context, fname string) bool {
+  fn, e := os.ReadFile(fname)
+  perr(e)
+  for _, line := range strings.Split(string(fn), "\n") {
+    if strings.Compare(line, MIGRATION_REQUIRED) == 0 {
+      return false
+    }
+  }
+
+  return true
+}
+
+func have_all_migrations_been_executed(ctx *Context) bool {
+  return len(get_all_unexecuted_migration_files(ctx)) == 0
+}
+
+func have_all_migrations_been_resolved(ctx *Context) bool {
+  for _, m := range get_all_unexecuted_migration_files(ctx) {
+    if !is_migration_resolved(ctx, m) {
+      return false
+    }
+  }
+
+  return true
+}
+
+func verify_all_migration_files(ctx *Context) {
+  migration_files := get_all_executed_migration_files(ctx)
+
+  for _, f := range migration_files {
+    if !does_migration_with_hash_exist_in_db(ctx, hash_file(f)) {
+      log.Panicf("Migration file %s has does not match the checksum in the database.\n", f)
+    }
+  }
+}
+
+func is_stmt_hash_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
+  r, e := ctx.db.Query("select * from morph.statements where stmt_hash=$1", stmt.hash)
+  perr(e)
+  return r.Next()
+}
+
+func is_stmt_name_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
+  if !stmt.has_name {
+    return false
+  }
+
+  r, e := ctx.db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.name, stmt.stmt_type);
+  perr(e)
+  return r.Next()
+}
+
+func set_stmt_status(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
+  for _, stmt := range stmts {
+    stmt_hash_found := is_stmt_hash_found_in_db(ctx, stmt)
+    stmt_name_found := is_stmt_name_found_in_db(ctx, stmt)
+
+    if (stmt_name_found && stmt_hash_found) || (!stmt_name_found && stmt_hash_found) {
+      stmt.status = UNCHANGED
+    } else if stmt_name_found && !stmt_hash_found {
+      stmt.status = CHANGED
+    } else {
+      stmt.status = NEW
+    }
+  }
+
+  return stmts
+}
+
+func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmt) bool {
+  for _, s := range stmts {
+    switch s.status {
+      case CHANGED:
+        return true
+      case NEW:
+        return true
+    }
+  }
+
+  return false
+}
+
+func write_migrations_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
+  for _, stmt := range stmts {
+    if stmt.status == UNCHANGED {
+      continue
+    }
+  
+
+    if stmt.status == NEW {
+      write_sql_stmt_to_migration_file(ctx, stmt.deparsed, false)
+    } else {
+      write_migration_for_stmt(ctx, stmt)
+    }
+  }
+}
+
+func create_next_migration(ctx *Context) {
+  migrations := get_all_executed_migration_files(ctx)
+
+  next_migration_file := path.Join(MIGRATION_FOLDER, "0.sql") 
+
+  if len(migrations) > 0 {
+    next_migration_file =  path.Join(MIGRATION_FOLDER, fmt.Sprintf("%d.sql", extract_number_from_migration_file_name(migrations[len(migrations)-1]) + 1))
+  }
+
+  ctx.migration_file_path = next_migration_file
+
+  f, e := os.Create(next_migration_file)
+  perr(e)
+
+  ctx.migration_file = f
+}
+
+func update_statements_in_db(ctx *Context, stmts []*ParsedStmt) {
+  for _, stmt := range stmts {
+    if stmt.status == UNCHANGED {
+      continue
+    }
+
+    if !stmt.has_name {
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3) on conflict (stmt_hash) do nothing", stmt.deparsed, stmt.hash, stmt.stmt_type)
+      perr(e)
+    } else {
+      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4) on conflict (stmt_hash) do nothing", stmt.deparsed, stmt.hash, stmt.name, stmt.stmt_type)
+      perr(e)
+    }
+  }
+}
+
+func execute_migrations(ctx *Context) {
+  for _, m := range get_all_unexecuted_migration_files(ctx) {
+    fmt.Printf("Executing %s\n", m)
+    perr(execute_sql_file(ctx, m))
+    perr(mark_migration_as_executed(ctx, m))
+  }
+}
+
+func clear_removed_statements_from_db(ctx *Context, stmts []*ParsedStmt) {
+  var hash string
+  
+  query, err := ctx.db.Query("select stmt_hash from morph.statements")
+  perr(err)
+  defer query.Close()
+
+  for query.Next() {
+    perr(query.Scan(&hash))
+
+    found := false
+
+    for _, stmt := range stmts {
+      if stmt.hash == hash {
+        found = true
+        break
+      }
+    }
+
+    if !found {
+      log.Printf("Removing %s\n", hash);
+      ctx.db_tx.Exec("delete from morph.statements where stmt_hash=$1", hash)
+    }
+  }
+
+}
+
+func clear_migrations(ctx *Context) {
+  os.RemoveAll(MIGRATION_FOLDER)
+  _, e := ctx.db.Exec("drop schema if exists morph cascade");
+  perr(e)
+  _, e = ctx.db.Exec("drop schema if exists public cascade");
+  perr(e)
+  _, e = ctx.db.Exec("create schema if not exists public")
+  perr(e)
 }
 
 func object_type_to_stmt_type(ot pg_query.ObjectType) StmtType {
@@ -426,7 +932,6 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
       relation := n.CreateStmt.GetRelation()
       ps.name = pg_rangevar_to_string(relation)
-      ps.stmt_type = TABLE
 
       append_dependency(ps, SCHEMA, relation.GetSchemaname())
 
@@ -469,9 +974,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       ps.name = build_name(schema_name, rel_name)
       ps.stmt_type = VIEW
 
-      if schema_name != "" {
-        append_dependency(ps, SCHEMA, schema_name)
-      }
+      append_dependency(ps, SCHEMA, schema_name)
 
       hydrate_stmt_object(n.ViewStmt.Query, ps)
     }
@@ -578,9 +1081,22 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       append_dependency(ps, TYPE, rtype)
 
       options := n.CreateFunctionStmt.GetOptions()
+      parameters := n.CreateFunctionStmt.GetParameters()
 
       for _, option := range options {
         hydrate_stmt_object(option, ps)
+      }
+
+      for _, parameter := range parameters {
+        hydrate_stmt_object(parameter, ps)
+      }
+    }
+
+    case *pg_query.Node_FunctionParameter: {
+      arg_type := n.FunctionParameter.GetArgType()
+
+      for _, name := range arg_type.GetNames() {
+        hydrate_stmt_object(name, ps)
       }
     }
 
@@ -972,429 +1488,6 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
   ps.sort_priority = int(ps.stmt_type)
 }
 
-func get_current_version_of_stmt(ctx *Context, stmt *ParsedStmt) (*pg_query.RawStmt, error) {
-  if stmt.has_name {
-    var code string
-    err := ctx.db.QueryRow("select stmt from morph.statements where stmt_type=$1 and stmt_name=$2", stmt.stmt_type, stmt.name).Scan(&code); 
-    if err != nil {
-      return nil, err 
-    }
-
-    result, err2 := pg_query.Parse(code)
-
-    if err2 != nil {
-      return nil, err2 
-    }
-
-    stmts := result.GetStmts()
-
-    if len(stmts) == 0 {
-      return nil, errors.New("Statements array is empty.")
-    }
-
-    return result.GetStmts()[0], nil
-  }
-
-  return nil, errors.New(fmt.Sprintf("Could not get current version of statement. %v\n", stmt));
-}
-
-func write_sql_stmt_to_migration_file(ctx *Context, stmt string, add_migration_required_line bool) {
-  if add_migration_required_line {
-    ctx.migration_file.WriteString(MIGRATION_REQUIRED + "\n")
-  }
-
-  if !strings.HasSuffix(stmt, ";") {
-    stmt += ";"
-  }
-
-  ctx.migration_file.WriteString(stmt + "\n")
-}
-
-func write_migration_for_stmt(ctx *Context, stmt *ParsedStmt) {
-  switch stmt.stmt_type {
-    case FUNCTION: {
-      drop_fn := fmt.Sprintf("DROP FUNCTION IF EXISTS %s", stmt.name)
-      write_sql_stmt_to_migration_file(ctx, drop_fn, false)
-      write_sql_stmt_to_migration_file(ctx, stmt.deparsed, false)
-    }
-
-    //case TABLE: {
-    //  create_tbl_stmt := stmt.stmt.GetStmt().GetCreateStmt()
-    //  cv, e := get_current_version_of_stmt(ctx, stmt)
-
-    //  fmt.Printf("ctx: %v %v\n", cv, e)
-
-    //  for _, col := range create_tbl_stmt.TableElts {
-    //    c := col.GetColumnDef();
-    //    fmt.Printf("c: %v\n", c)
-    //  }
-    //  panic("ASD")
-    //}
-
-    default: {
-      cv, e := get_current_version_of_stmt(ctx, stmt)
-
-      if e != nil {
-        write_sql_stmt_to_migration_file(ctx, stmt.deparsed, true)
-      } else {
-        deparsed, err := deparse_raw_stmt(cv)
-        perr(err)
-        block := fmt.Sprintf(`/*
-%s
-
-Currently:
-%s
-
-Changed to:
-%s
-*/
-`, MIGRATION_REQUIRED, deparsed, stmt.deparsed) 
-        ctx.migration_file.WriteString(block)
-      }
-    }
-  }
-}
-
-func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
-  var ps []*ParsedStmt
-  var dependencies []Dependency
-
-  for _, x := range pr.Stmts {
-    dp, err := deparse_raw_stmt(x)
-    perr(err)
-    json, err := pg_query.ParseToJSON(dp)
-    perr(err)
-    nps := &ParsedStmt{ 
-      x, 
-      false,
-      "",
-      dp, 
-      0,
-      json,
-      hash_string(dp), 
-      UNKNOWN, 
-      UNKNOWN_TYPE,
-      dependencies,
-    }
-    hydrate_stmt_object(x.GetStmt(), nps)
-    ps = append(ps, nps) 
-  }
-
-  return ps
-}
-
-func parse_sql(code string) (*pg_query.ParseResult, error) {
-  pr, err := pg_query.Parse(code) 
-  return pr, err
-}
-
-func sort_stmts_by_priority(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
-  sorted_ps := make([]*ParsedStmt, 0)
-
-  for _, s := range stmts {
-    fmt.Printf("\n\n-----\n%v\nNAME: %s\nDEPENDS ON: %v\n\n", s.deparsed, s.name, s.dependencies)
-  }
-
-  return sorted_ps
-}
-
-func process_sql_files(ctx *Context) []*ParsedStmt {
-  var ps []*ParsedStmt
-
-  err := filepath.Walk(ctx.sql_path, func(path string, info fs.FileInfo, err error) error {
-    perr(err)
-
-    if !strings.HasSuffix(info.Name(), ".sql") {
-      return nil
-    }
-
-    fdata, err := os.ReadFile(path)
-
-    perr(err)
-
-    parsed_file, parse_err := parse_sql(string(fdata))
-
-    if parse_err != nil {
-      log.Panicf("Syntax Error in %v:\n\n %v\n", path, parse_err)
-    }
-
-    extracted := extract_stmts(parsed_file)
-
-    ps = append(ps, extracted...)
-
-    return nil
-  })
-
-  perr(err)
-
-  return ps
-}
-
-func init_migration_schema(ctx *Context) {
-  _, e := ctx.db.Query(MIGRATION_SCHEMA) 
-  perr(e)
-}
-
-func init_migrations_folder(ctx *Context) {
-  _, err := os.Stat(MIGRATION_FOLDER)
-  if os.IsNotExist(err) {
-    os.Mkdir("migrations", os.FileMode(0777))
-  }
-}
-
-func hash_string(s string) string {
-  h := sha1.New()
-  h.Write([]byte(s))
-  r := h.Sum(nil)
-  return hex.EncodeToString(r)
-}
-
-func hash_file(p string) string {
-  data, e := os.ReadFile(p)
-  perr(e)
-  sdata := string(data)
-  return hash_string(sdata) 
-}
-
-func execute_sql_file(ctx *Context, fname string) error {
-  fd, e := os.ReadFile(fname)
-  perr(e)
-
-  _, e = ctx.db_tx.Exec(string(fd))
-  return e
-}
-
-func mark_migration_as_executed(ctx *Context, fname string) error {
-  _, e := ctx.db_tx.Exec("insert into morph.migrations (file_name, file_hash) values ($1, $2)", fname, hash_file(fname)) 
-  return e
-}
-
-func does_migration_with_file_name_exist_in_db(ctx *Context, file_name string) bool {
-  r, e := ctx.db.Query("select true from morph.migrations where file_name=$1", file_name)
-  perr(e)
-  return r.Next()
-}
-
-func does_migration_with_hash_exist_in_db(ctx *Context, hash string) bool {
-  r, e := ctx.db.Query("select true from morph.migrations where file_hash=$1", hash)
-  perr(e)
-  return r.Next()
-}
-
-func get_all_executed_migration_files(ctx *Context) []string {
-  var files []string
-
-  for _, f := range list_all_files_in_path(MIGRATION_FOLDER) {
-    if does_migration_with_file_name_exist_in_db(ctx, f) {
-      files = append(files, f) 
-    }
-  }
-
-  return files
-}
-
-func extract_number_from_migration_file_name(fname string) int {
-  fname = strings.ReplaceAll(fname, MIGRATION_FOLDER + "/", "")
-  fi, e1 := strconv.Atoi(strings.Split(fname, ".")[0])
-  perr(e1)
-
-  return fi
-}
-
-func get_all_unexecuted_migration_files(ctx *Context) []string {
-  var files []string
-
-  for _, f := range list_all_files_in_path(MIGRATION_FOLDER) {
-    if !does_migration_with_file_name_exist_in_db(ctx, f) {
-      files = append(files, f) 
-    }
-  }
-
-  sort.Slice(files, func(i int, j int) bool {
-    fi := extract_number_from_migration_file_name(files[i])
-    fj := extract_number_from_migration_file_name(files[j])
-
-    return fj > fi
-  });
-
-  return files
-}
-
-func is_migration_resolved(ctx *Context, fname string) bool {
-  fn, e := os.ReadFile(fname)
-  perr(e)
-  for _, line := range strings.Split(string(fn), "\n") {
-    if strings.Compare(line, MIGRATION_REQUIRED) == 0 {
-      return false
-    }
-  }
-
-  return true
-}
-
-func have_all_migrations_been_executed(ctx *Context) bool {
-  return len(get_all_unexecuted_migration_files(ctx)) == 0
-}
-
-func have_all_migrations_been_resolved(ctx *Context) bool {
-  for _, m := range get_all_unexecuted_migration_files(ctx) {
-    if !is_migration_resolved(ctx, m) {
-      return false
-    }
-  }
-
-  return true
-}
-
-func verify_all_migration_files(ctx *Context) {
-  migration_files := get_all_executed_migration_files(ctx)
-
-  for _, f := range migration_files {
-    if !does_migration_with_hash_exist_in_db(ctx, hash_file(f)) {
-      log.Panicf("Migration file %s has does not match the checksum in the database.\n", f)
-    }
-  }
-}
-
-func is_stmt_hash_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
-  r, e := ctx.db.Query("select * from morph.statements where stmt_hash=$1", stmt.hash)
-  perr(e)
-  return r.Next()
-}
-
-func is_stmt_name_found_in_db(ctx *Context, stmt *ParsedStmt) bool {
-  if !stmt.has_name {
-    return false
-  }
-
-  r, e := ctx.db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.name, stmt.stmt_type);
-  perr(e)
-  return r.Next()
-}
-
-func set_stmt_status(ctx *Context, stmts []*ParsedStmt) []*ParsedStmt {
-  for _, stmt := range stmts {
-    stmt_hash_found := is_stmt_hash_found_in_db(ctx, stmt)
-    stmt_name_found := is_stmt_name_found_in_db(ctx, stmt)
-
-    if (stmt_name_found && stmt_hash_found) || (!stmt_name_found && stmt_hash_found) {
-      stmt.status = UNCHANGED
-    } else if stmt_name_found && !stmt_hash_found {
-      stmt.status = CHANGED
-    } else {
-      stmt.status = NEW
-    }
-  }
-
-  return stmts
-}
-
-func do_any_stmts_require_migration(ctx *Context, stmts []*ParsedStmt) bool {
-  for _, s := range stmts {
-    switch s.status {
-      case CHANGED:
-        return true
-      case NEW:
-        return true
-    }
-  }
-
-  return false
-}
-
-func write_migrations_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
-  for _, stmt := range stmts {
-    if stmt.status == UNCHANGED {
-      continue
-    }
-  
-
-    if stmt.status == NEW {
-      write_sql_stmt_to_migration_file(ctx, stmt.deparsed, false)
-    } else {
-      write_migration_for_stmt(ctx, stmt)
-    }
-  }
-}
-
-func create_next_migration(ctx *Context) {
-  migrations := get_all_executed_migration_files(ctx)
-
-  next_migration_file := path.Join(MIGRATION_FOLDER, "0.sql") 
-
-  if len(migrations) > 0 {
-    next_migration_file =  path.Join(MIGRATION_FOLDER, fmt.Sprintf("%d.sql", extract_number_from_migration_file_name(migrations[len(migrations)-1]) + 1))
-  }
-
-  ctx.migration_file_path = next_migration_file
-
-  f, e := os.Create(next_migration_file)
-  perr(e)
-
-  ctx.migration_file = f
-}
-
-func update_statements_in_db(ctx *Context, stmts []*ParsedStmt) {
-  for _, stmt := range stmts {
-    if stmt.status == UNCHANGED {
-      continue
-    }
-
-    if !stmt.has_name {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3) on conflict (stmt_hash) do nothing", stmt.deparsed, stmt.hash, stmt.stmt_type)
-      perr(e)
-    } else {
-      _, e := ctx.db_tx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_name, stmt_type) values ($1, $2, $3, $4) on conflict (stmt_hash) do nothing", stmt.deparsed, stmt.hash, stmt.name, stmt.stmt_type)
-      perr(e)
-    }
-  }
-}
-
-func execute_migrations(ctx *Context) {
-  for _, m := range get_all_unexecuted_migration_files(ctx) {
-    fmt.Printf("Executing %s\n", m)
-    perr(execute_sql_file(ctx, m))
-    perr(mark_migration_as_executed(ctx, m))
-  }
-}
-
-func clear_removed_statements_from_db(ctx *Context, stmts []*ParsedStmt) {
-  var hash string
-  
-  query, err := ctx.db.Query("select stmt_hash from morph.statements")
-  perr(err)
-  defer query.Close()
-
-  for query.Next() {
-    perr(query.Scan(&hash))
-
-    found := false
-
-    for _, stmt := range stmts {
-      if stmt.hash == hash {
-        found = true
-        break
-      }
-    }
-
-    if !found {
-      log.Printf("Removing %s\n", hash);
-      ctx.db_tx.Exec("delete from morph.statements where stmt_hash=$1", hash)
-    }
-  }
-
-}
-
-func clear_migrations(ctx *Context) {
-  os.RemoveAll(MIGRATION_FOLDER)
-  _, e := ctx.db.Exec("drop schema if exists morph cascade");
-  perr(e)
-  _, e = ctx.db.Exec("drop schema if exists public cascade");
-  perr(e)
-  _, e = ctx.db.Exec("create schema if not exists public")
-  perr(e)
-}
-
 func main() {
   ctx := parse_args()
   db := create_db_connection(ctx.db_context)
@@ -1426,7 +1519,7 @@ func main() {
     stmts := process_sql_files(ctx)
     set_stmt_status(ctx, stmts)
 
-    stmts = sort_stmts_by_priority(ctx, stmts)
+    stmts = sort_stmts_by_priority(stmts)
 
     if !do_any_stmts_require_migration(ctx, stmts) {
       log.Fatal("No migrations required.")
