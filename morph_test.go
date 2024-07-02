@@ -33,7 +33,7 @@ func TestViewDependency(t *testing.T) {
 
     correct := []Dependency{
       *build_dependency(SCHEMA, "abc" ),
-      *build_dependency(COLUMN_TYPE, "my_domain"),
+      *build_dependency(GENERIC_TYPE, "my_domain"),
       *build_dependency(TABLE, "a_cool_table"),
       *build_dependency(TABLE, "b_cool_table"),
       *build_dependency(TABLE, "c_cool_table"),
@@ -66,7 +66,7 @@ func TestTableForeignKeyDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency {
-      *build_dependency(COLUMN_TYPE, "int4" ),
+      *build_dependency(GENERIC_TYPE, "int4" ),
       *build_dependency(TABLE, "parent_table" ),
     }
 
@@ -96,7 +96,7 @@ func TestTableInheritedDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency {
-      *build_dependency(COLUMN_TYPE, "int4"),
+      *build_dependency(GENERIC_TYPE, "int4"),
       *build_dependency(TABLE, "parent_table"),
     }
 
@@ -153,7 +153,7 @@ func TestTableFunctionDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(COLUMN_TYPE, "uuid"),
+      *build_dependency(GENERIC_TYPE, "uuid"),
       *build_dependency(FUNCTION, "uuid_generate_v4"),
     }
 
@@ -183,7 +183,7 @@ func TestTableSequenceDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(COLUMN_TYPE, "int4"),
+      *build_dependency(GENERIC_TYPE, "int4"),
       *build_dependency(SEQUENCE, "example_sequence"),
     }
 
@@ -213,7 +213,7 @@ func TestTableCustomTypeDependency(t *testing.T) {
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(COLUMN_TYPE, "positive_integer"),
+      *build_dependency(GENERIC_TYPE, "positive_integer"),
     }
 
     var checked []Dependency
@@ -243,7 +243,7 @@ func TestTableCollateDependency(t *testing.T) {
 
     correct := []Dependency{
       *build_dependency(COLLATION, "romanian_phonebook"),
-      *build_dependency(COLUMN_TYPE, "text"),
+      *build_dependency(GENERIC_TYPE, "text"),
     }
 
     var checked []Dependency
@@ -273,7 +273,7 @@ func TestTableSchemaDependency(t *testing.T) {
 
     correct := []Dependency{
       *build_dependency(SCHEMA, "my_schema"),
-      *build_dependency(COLUMN_TYPE, "int4"),
+      *build_dependency(GENERIC_TYPE, "int4"),
     }
 
     var checked []Dependency
@@ -303,7 +303,7 @@ func TestTableTablespaceDependency(t *testing.T) {
 
     correct := []Dependency{
       *build_dependency(TABLESPACE, "example_tablespace"),
-      *build_dependency(COLUMN_TYPE, "int4"),
+      *build_dependency(GENERIC_TYPE, "int4"),
     }
 
     var checked []Dependency
@@ -335,7 +335,7 @@ func TestInsertDependency(t *testing.T) {
       *build_dependency(TABLE, "abc"),
       *build_dependency(FUNCTION, "call_this_func"),
       *build_dependency(FUNCTION, "with_this_nested_call"),
-      *build_dependency(COLUMN_TYPE, "my_custom_number_type"),
+      *build_dependency(GENERIC_TYPE, "my_custom_number_type"),
       *build_dependency(TABLE, "some_other_table"),
     }
 
@@ -368,7 +368,7 @@ func TestWithDependency(t *testing.T) {
       *build_dependency(TABLE, "first"),
       *build_dependency(TABLE, "second"),
       *build_dependency(TABLE, "qvc"),
-      *build_dependency(COLUMN_TYPE, "ct"),
+      *build_dependency(GENERIC_TYPE, "ct"),
       *build_dependency(TABLE, "abc"),
     }
 

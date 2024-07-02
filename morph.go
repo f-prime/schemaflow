@@ -85,7 +85,7 @@ const (
   DOMAIN
   DOMAIN_CONSTRAINT
   TYPE
-  COLUMN_TYPE // This is an ambiguous type. Could be a domain or a type.
+  GENERIC_TYPE // This is an ambiguous type. Could be a domain or a type.
   AGGREGATE
   COLLATION
   LANGUAGE
@@ -503,12 +503,12 @@ func hydrate_dependencies(stmts []*ParsedStmt) {
           if p2.stmt_type == dep.stmt_type {
             dep.dependency = p2
             break
-          } else if p2.stmt_type == COLUMN_TYPE {
+          } else if p2.stmt_type == GENERIC_TYPE {
             if dep.stmt_type == DOMAIN || dep.stmt_type == TYPE || dep.stmt_type == ENUM {
               dep.dependency = p2
               break
             }
-          } else if dep.stmt_type == COLUMN_TYPE {
+          } else if dep.stmt_type == GENERIC_TYPE {
             if p2.stmt_type == DOMAIN || p2.stmt_type == TYPE || p2.stmt_type == ENUM {
               dep.dependency = p2
               break
@@ -1078,7 +1078,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       ps.stmt_type = FUNCTION
       ps.name = func_name
 
-      append_dependency(ps, TYPE, rtype)
+      append_dependency(ps, GENERIC_TYPE, rtype)
 
       options := n.CreateFunctionStmt.GetOptions()
       parameters := n.CreateFunctionStmt.GetParameters()
@@ -1125,7 +1125,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
       type_name := n.CreateDomainStmt.GetTypeName()
 
-      append_dependency(ps, TYPE, pg_typename_to_string(type_name))
+      append_dependency(ps, GENERIC_TYPE, pg_typename_to_string(type_name))
 
       for _, constraint := range constraints {
         hydrate_stmt_object(constraint, ps)
@@ -1391,7 +1391,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       name_as_string := pg_nodes_to_string(type_name.GetNames())
 
       if !strings.HasPrefix(name_as_string, "pg_catalog") {
-        append_dependency(ps, COLUMN_TYPE, name_as_string)
+        append_dependency(ps, GENERIC_TYPE, name_as_string)
       }
     }
 
@@ -1435,7 +1435,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       append_dependency(ps, COLLATION, pg_nodes_to_string(colc.GetCollname()))
 
       if !strings.HasPrefix(column_type_name, "pg_catalog") {
-        append_dependency(ps, COLUMN_TYPE, column_type_name)
+        append_dependency(ps, GENERIC_TYPE, column_type_name)
       }
 
       for _, constraint := range constraints {
@@ -1451,6 +1451,31 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       append_dependency(ps, TABLE, pktable_name)
 
       hydrate_stmt_object(raw_expr, ps)
+    }
+
+    case *pg_query.Node_UpdateStmt: {
+      relation := n.UpdateStmt.GetRelation()
+      schema := relation.GetSchemaname()
+      table := relation.GetRelname()
+
+      fmt.Printf("table: %v\n", table)
+
+      append_dependency(ps, SCHEMA, schema)
+      append_dependency(ps, TABLE, table)
+
+      from := n.UpdateStmt.GetFromClause()
+      targets := n.UpdateStmt.GetTargetList()
+      where := n.UpdateStmt.GetWhereClause()
+
+      for _, f := range from {
+        hydrate_stmt_object(f, ps)
+      }
+
+      for _, t := range targets {
+        hydrate_stmt_object(t, ps)
+      }
+
+      hydrate_stmt_object(where, ps)
     }
 
     case *pg_query.Node_JoinExpr: {
