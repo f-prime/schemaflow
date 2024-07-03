@@ -7,8 +7,8 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
-func dependency_test_failed(t *testing.T, deps any, correct any) {
-  t.Errorf("Dependencies error\n\nRECEIVED:  %v\nCORRECT:   %v", deps, correct) 
+func test_failed(t *testing.T, deps any, correct any) {
+  t.Errorf("FAILED\n\nRECEIVED:  %v\nCORRECT:   %v", deps, correct) 
 }
 
 func TestViewDependency(t *testing.T) {
@@ -48,7 +48,7 @@ func TestViewDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -77,7 +77,7 @@ func TestTableForeignKeyDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -107,7 +107,7 @@ func TestTableInheritedDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -135,7 +135,7 @@ func TestTablePartitionDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -164,7 +164,7 @@ func TestTableFunctionDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -194,7 +194,7 @@ func TestTableSequenceDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -223,7 +223,7 @@ func TestTableCustomTypeDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -253,7 +253,7 @@ func TestTableCollateDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -283,7 +283,7 @@ func TestTableSchemaDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -313,7 +313,7 @@ func TestTableTablespaceDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
 }
@@ -346,7 +346,7 @@ func TestInsertDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
  
@@ -379,7 +379,7 @@ func TestWithDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
  
@@ -407,7 +407,7 @@ func TestCommentDependency(t *testing.T) {
     }
 
     if !reflect.DeepEqual(correct, checked) {
-      dependency_test_failed(t, checked, correct) 
+      test_failed(t, checked, correct) 
     }
   });
  
