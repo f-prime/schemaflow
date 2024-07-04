@@ -5,11 +5,7 @@ import (
 	"strings"
 )
 
-func build_sql_stmt_for_migration_file(acc *[]string, stmt string, add_migration_required_line bool)  {
-  if add_migration_required_line {
-    *acc = append(*acc, MIGRATION_REQUIRED + "\n")
-  }
-
+func build_sql_stmt_for_migration_file(acc *[]string, stmt string) {
   if !strings.HasSuffix(stmt, ";") {
     stmt += ";"
   }
@@ -18,33 +14,40 @@ func build_sql_stmt_for_migration_file(acc *[]string, stmt string, add_migration
 }
 
 func build_sql_stmt(sql string, args ...any) string {
-  return fmt.Sprintf(sql, args...)
+  stmt := fmt.Sprintf(sql, args...)
+  if !strings.HasSuffix(stmt, ";") {
+    return stmt + ";"
+  }
+
+  return stmt
 }
 
 func get_migration_for_stmt(ctx *Context, stmt *ParsedStmt) []string {
   var sql_stmt []string
 
-  _ = stmt.stmt.GetStmt()
+  s := stmt.stmt.GetStmt()
+  prev_stmt := stmt.prev_version_stmt.GetStmt()
   
   switch stmt.stmt_type {
     case FUNCTION: {
       drop_fn := build_sql_stmt("DROP FUNCTION IF EXISTS %s", stmt.name)
-      build_sql_stmt_for_migration_file(&sql_stmt, drop_fn, false)
-      build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed, false)
+      build_sql_stmt_for_migration_file(&sql_stmt, drop_fn)
+      build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
     }
 
     case VIEW: {
       drop_view := build_sql_stmt("DROP VIEW IF EXISTS %s", stmt.name)
-      build_sql_stmt_for_migration_file(&sql_stmt, drop_view, false)
-      build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed, false)
+      build_sql_stmt_for_migration_file(&sql_stmt, drop_view)
+      build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
     }
 
     case TABLE: {
+      table_migrations(&sql_stmt, s, prev_stmt, stmt)
     }
 
     default: {
       if ctx == nil {
-        build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed, true)
+        build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
         break
       }
 
@@ -52,20 +55,18 @@ func get_migration_for_stmt(ctx *Context, stmt *ParsedStmt) []string {
 
       if e != nil {
         // This means it's a new statement so just throw it in.
-        build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed, true)
+        build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
       } else {
         deparsed, err := deparse_raw_stmt(cv)
         perr(err)
         sql_stmt = append(sql_stmt, fmt.Sprintf(`/*
-%s
-
 Currently:
 %s
 
 Changed to:
 %s
 */
-`, MIGRATION_REQUIRED, deparsed, stmt.deparsed)) 
+`, deparsed, stmt.deparsed)) 
       }
     }
   }
@@ -83,6 +84,8 @@ func write_migration_for_stmt(ctx *Context, stmt *ParsedStmt) {
 }
 
 func write_migrations_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
+  write_sql_stmt_to_migration_file(ctx, MIGRATION_REQUIRED + "\n")
+
   for _, stmt := range stmts {
     if stmt.status == UNCHANGED {
       continue

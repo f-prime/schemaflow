@@ -1,11 +1,40 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
+
+func pg_aconst_to_string(ac *pg_query.A_Const) string {
+  if ac.GetIsnull() {
+    return "NULL"
+  } else {
+    s_val := ac.GetSval()
+    i_val := ac.GetIval()
+    f_val := ac.GetFval()
+    b_val := ac.GetBsval()
+    bool_val := ac.GetBoolval()
+
+    if s_val != nil {
+      return fmt.Sprintf("'%s'", s_val.GetSval())
+    } else if i_val != nil {
+      return fmt.Sprintf("%d", i_val.GetIval())
+    } else if f_val != nil {
+      return fmt.Sprintf("'%s'", b_val.GetBsval())
+    } else if bool_val != nil {
+      if bool_val.GetBoolval() {
+        return fmt.Sprintf("TRUE")
+      } else {
+        return fmt.Sprintf("FALSE")
+      }
+    } else {
+      return ""
+    }
+  }
+}
 
 func pg_nodes_to_string(nodes []*pg_query.Node) string {
   if len(nodes) == 0 {
@@ -35,8 +64,8 @@ func pg_rangevar_to_string(rv *pg_query.RangeVar) string {
 
 func pg_typename_to_string(tn *pg_query.TypeName) string {
   names := tn.GetNames()
-  var name []string;
 
+  var name []string;
 
   for _, n := range names {
     str := n.GetString_()

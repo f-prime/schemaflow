@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
-	//pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
 func TestDomainMigration(t *testing.T) {
@@ -28,7 +26,8 @@ func TestDomainMigration(t *testing.T) {
 func TestTableMigration(t *testing.T) {
   prev := `
   create table abc (
-    id integer primary key 
+    id integer primary key,
+    state varhchar(2)
   );
   ;
   `
@@ -38,8 +37,9 @@ func TestTableMigration(t *testing.T) {
 
   next := `
     create table abc (
-      id integer primary key,
-      name text
+      id integer primary key check ( NOT (id > 0 AND id <> -1 AND id is not null) ),
+      name text COLLATE "en_us" not null,
+      state varchar(2) default 'NJ' not null
     );
   `
 
@@ -53,10 +53,9 @@ func TestTableMigration(t *testing.T) {
     migration := get_migration_for_stmt(nil, stmt)
 
     correct := []string{
-      "ALTER TABLE abc ADD COLUMN name text;",
+      "ALTER TABLE abc ADD COLUMN name text;\n",
+      "ALTER TABLE abc ALTER COLUMN state SET DEFAULT 'NJ';\n",
     }
-
-    fmt.Printf("migration: %v\n", migration)
 
     if !reflect.DeepEqual(correct, migration) {
       test_failed(t, migration, correct)
