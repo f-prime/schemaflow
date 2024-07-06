@@ -5,44 +5,44 @@ import (
 	"log"
 )
 
-func compute_not_in_old(d Diffable) []string {
-  var new_in_old []string
+func compute_added_objects(d Diffable) []string {
+  var added_items []string
 
-  for _, hs := range d.GetCurrentNames() {
+  for _, n := range d.GetNewNames() {
     found := false
-    for _, ns := range d.GetNewNames() {
-      if hs == ns {
+    for _, c := range d.GetCurrentNames() {
+      if c == n {
         found = true
         break
       }
     }
 
     if !found {
-      new_in_old = append(new_in_old, hs) 
+      added_items = append(added_items, n)
     }
   }
 
-  return new_in_old
+  return added_items 
 }
 
-func compute_not_in_new(d Diffable) []string {
-  var new_not_in_old []string
+func compute_removed_objects(d Diffable) []string {
+  var removed_items []string
 
-  for _, hs := range d.GetNewNames() {
+  for _, n := range d.GetCurrentNames() {
     found := false
-    for _, ns := range d.GetCurrentNames() {
-      if hs == ns {
+    for _, c := range d.GetNewNames() {
+      if c == n {
         found = true
         break
       }
     }
 
     if !found {
-      new_not_in_old = append(new_not_in_old, hs) 
+      removed_items = append(removed_items, n)
     }
   }
 
-  return new_not_in_old 
+  return removed_items 
 }
 
 type Diffable interface {

@@ -33,7 +33,7 @@ func (x *DiffableExtensions) GetNewNames() []string {
 func (x *DiffableExtensions) GenerateDropStmts(ctx *Context) []string {
   var drops []string
 
-  for _, v := range compute_not_in_new(x) {
+  for _, v := range compute_removed_objects(x) {
     drops = append(drops, fmt.Sprintf("DROP EXTENSION IF EXISTS %s;", v))
   }
 
@@ -43,7 +43,7 @@ func (x *DiffableExtensions) GenerateDropStmts(ctx *Context) []string {
 func (x *DiffableExtensions) GenerateAddStmts(ctx *Context) []string {
   var adds []string
 
-  for _, v := range compute_not_in_old(x) {
+  for _, v := range compute_added_objects(x) {
     adds = append(adds, fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s;", v))
   }
 
