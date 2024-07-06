@@ -2,99 +2,165 @@ package main
 
 import (
 	"fmt"
-	"strings"
+	"log"
 )
 
-func build_sql_stmt_for_migration_file(acc *[]string, stmt string) {
-  if !strings.HasSuffix(stmt, ";") {
-    stmt += ";"
-  }
+func compute_not_in_old(d Diffable) []string {
+  var new_in_old []string
 
-  *acc = append(*acc, stmt + "\n")
-}
-
-func build_sql_stmt(sql string, args ...any) string {
-  stmt := fmt.Sprintf(sql, args...)
-  if !strings.HasSuffix(stmt, ";") {
-    return stmt + ";"
-  }
-
-  return stmt
-}
-
-func get_migration_for_stmt(ctx *Context, stmt *ParsedStmt) []string {
-  var sql_stmt []string
-
-  s := stmt.stmt.GetStmt()
-  prev_stmt := stmt.prev_version_stmt.GetStmt()
-  
-  switch stmt.stmt_type {
-    case FUNCTION: {
-      drop_fn := build_sql_stmt("DROP FUNCTION IF EXISTS %s", stmt.name)
-      build_sql_stmt_for_migration_file(&sql_stmt, drop_fn)
-      build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
-    }
-
-    case VIEW: {
-      drop_view := build_sql_stmt("DROP VIEW IF EXISTS %s", stmt.name)
-      build_sql_stmt_for_migration_file(&sql_stmt, drop_view)
-      build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
-    }
-
-    case TABLE: {
-      table_migrations(&sql_stmt, s, prev_stmt, stmt)
-    }
-
-    default: {
-      if ctx == nil {
-        build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
+  for _, hs := range d.GetCurrentNames() {
+    found := false
+    for _, ns := range d.GetNewNames() {
+      if hs == ns {
+        found = true
         break
       }
+    }
 
-      cv, e := get_current_version_of_stmt(ctx, stmt)
+    if !found {
+      new_in_old = append(new_in_old, hs) 
+    }
+  }
 
-      if e != nil {
-        // This means it's a new statement so just throw it in.
-        build_sql_stmt_for_migration_file(&sql_stmt, stmt.deparsed)
-      } else {
-        deparsed, err := deparse_raw_stmt(cv)
-        perr(err)
-        sql_stmt = append(sql_stmt, fmt.Sprintf(`/*
-Currently:
-%s
+  return new_in_old
+}
 
-Changed to:
-%s
-*/
-`, deparsed, stmt.deparsed)) 
+func compute_not_in_new(d Diffable) []string {
+  var new_not_in_old []string
+
+  for _, hs := range d.GetNewNames() {
+    found := false
+    for _, ns := range d.GetCurrentNames() {
+      if hs == ns {
+        found = true
+        break
       }
     }
-  }
 
-  return sql_stmt
-}
-
-func write_sql_stmt_to_migration_file(ctx *Context, sql string) {
-  ctx.migration_file.WriteString(sql);
-}
-
-func write_migration_for_stmt(ctx *Context, stmt *ParsedStmt) {
-  sql := get_migration_for_stmt(ctx, stmt)
-  write_sql_stmt_to_migration_file(ctx, strings.Join(sql, "\n"))
-}
-
-func write_migrations_to_next_migration_file(ctx *Context, stmts []*ParsedStmt) {
-  write_sql_stmt_to_migration_file(ctx, MIGRATION_REQUIRED + "\n")
-
-  for _, stmt := range stmts {
-    if stmt.status == UNCHANGED {
-      continue
-    }
-
-    if stmt.status == NEW {
-      write_sql_stmt_to_migration_file(ctx, stmt.deparsed)
-    } else {
-      write_migration_for_stmt(ctx, stmt)
+    if !found {
+      new_not_in_old = append(new_not_in_old, hs) 
     }
   }
+
+  return new_not_in_old 
+}
+
+type Diffable interface {
+  GenerateDropStmts(ctx *Context) []string
+  GenerateAddStmts(ctx *Context) []string
+  GenerateUpdateStmts(ctx *Context) []string
+  GetCurrentNames() []string
+  GetNewNames() []string
+}
+
+func build_migrations_for(ctx *Context, x Diffable) []string {
+  var migrations []string
+
+  migrations = append(migrations, x.GenerateDropStmts(ctx)...)
+  migrations = append(migrations, x.GenerateAddStmts(ctx)...)
+  migrations = append(migrations, x.GenerateUpdateStmts(ctx)...)
+
+  return migrations
+}
+
+
+func generate_extension_migrations(ctx *Context) []string {
+  list_current := get_list_of_extensions(ctx.db)
+  list_new := get_list_of_extensions(ctx.migration_db)
+
+  diffable_exts := DiffableExtensions {
+    current_extensions: list_current,
+    new_extensions: list_new,
+  }
+
+  return build_migrations_for(ctx, &diffable_exts)
+}
+
+func generate_schema_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_role_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_sequence_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_table_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_columns_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_indexes_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_views_migrations(ctx *Context) []string {
+  var migrations []string
+
+  //list_current := get_list_of_views(ctx.db)
+  //list_new := get_list_of_views(ctx.migration_db)
+
+  return migrations
+}
+
+func generate_matviews_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_foreign_keys_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_functions_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_triggers_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_owners_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_grant_relationships_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_grant_attributes_migrations(ctx *Context) []string {
+  var migrations []string
+  return migrations
+}
+
+func generate_migrations(ctx *Context) []string {
+  var migrations []string
+
+  log.Println("Generating migrations...")
+
+  migrations = append(migrations, generate_extension_migrations(ctx)...)
+  migrations = append(migrations, generate_schema_migrations(ctx)...)
+
+  migrations = append(migrations, generate_views_migrations(ctx)...)
+
+  fmt.Printf("migrations: %v\n", migrations)
+
+  return migrations
 }

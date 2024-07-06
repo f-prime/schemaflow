@@ -1,12 +1,29 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
+
+func hash_string(s string) string {
+  h := sha1.New()
+  h.Write([]byte(s))
+  r := h.Sum(nil)
+  return hex.EncodeToString(r)
+}
+
+func hash_file(p string) string {
+  data, e := os.ReadFile(p)
+  perr(e)
+  sdata := string(data)
+  return hash_string(sdata) 
+}
 
 func pg_aconst_to_string(ac *pg_query.A_Const) string {
   if ac.GetIsnull() {
@@ -900,14 +917,12 @@ func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
     json, err := pg_query.ParseToJSON(dp)
     perr(err)
     nps := &ParsedStmt{ 
-      prev_version_stmt: nil,
       stmt: x, 
       has_name: false,
       name: "",
       deparsed: dp, 
       json: json,
       hash: hash_string(dp), 
-      status: UNKNOWN, 
       stmt_type: UNKNOWN_TYPE,
       dependencies: dependencies,
       handled: false,

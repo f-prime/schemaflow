@@ -1,3 +1,5 @@
+create extension pg_trgm;
+
 create table person (
   id serial primary key,
   created timestamp default now(),
