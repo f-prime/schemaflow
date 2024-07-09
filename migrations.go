@@ -5,6 +5,15 @@ import (
 	"log"
 )
 
+/* 
+
+UNIVERSAL STRUCTURES
+
+- Roles
+- Tablespaces
+
+*/
+
 func build_string_array[T any](vals []T, f func(T) string) []string {
   var result []string
 
@@ -99,28 +108,8 @@ func generate_schema_migrations(ctx *Context) []string {
 }
 
 func generate_role_migrations(ctx *Context) []string {
-  list_current := get_list_of_roles(ctx.db)
-  list_new := get_list_of_roles(ctx.migration_db)
-
-  current_map := make(map[string]*PgRole)
-  new_map := make(map[string]*PgRole)
-
-  for _, c := range list_current {
-    current_map[c.rolname] = &c
-  }
-
-  for _, n := range list_new {
-    new_map[n.rolname] = &n
-  }
-
-  diffable_roles := DiffableRoles {
-    current_roles: list_current,
-    new_roles: list_new,
-    current_roles_map: current_map,
-    new_roles_map: new_map,
-  }
-
-  return build_migrations_for(ctx, &diffable_roles)
+  var roles []string
+  return roles
 }
 
 func generate_sequence_migrations(ctx *Context) []string {
@@ -217,7 +206,10 @@ func generate_migrations(ctx *Context) []string {
   // migrations = append(migrations, generate_role_migrations(ctx)...)
   migrations = append(migrations, generate_table_migrations(ctx)...)
 
-  fmt.Printf("migrations: %v\n", migrations)
+  fmt.Println("MIGRATIONS:")
+  for _, m := range migrations {
+    fmt.Printf("%v\n", m)
+  }
 
   return migrations
 }

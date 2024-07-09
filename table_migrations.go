@@ -56,7 +56,24 @@ func (x *DiffableTable) GenerateUpdateStmts(ctx *Context) []string {
         continue
       }
 
-      fmt.Printf("PROCESS %s %v %v\n", nt, x.new_tables_map[nt], x.current_tables_map[ct])
+      old_obj := x.current_tables_map[ct]
+      new_obj := x.new_tables_map[nt]
+
+      if old_obj.reltablespace != new_obj.reltablespace {
+        new_ts := new_obj.reltablespace
+
+        if new_ts != "" {
+          stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s SET TABLESPACE %s;", nt, new_ts))
+        } else {
+          stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s SET TABLESPACE pg_default;", nt))
+        }
+      } 
+
+      if old_obj.relowner != new_obj.relowner {
+        new_o := new_obj.relowner
+
+        stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s OWNER TO %s;", nt, new_o))
+      }
     }
   }
 
@@ -68,14 +85,14 @@ func get_list_of_tables(db *sql.DB) []PgTable {
 
   r, err := db.Query(`
 SELECT
-  pc.relname relname
-  ,pn.nspname relnamespace
-  ,pt.typname reltype
-  ,pto.typname reloftype
-  ,po.rolname relowner
-  ,pam.amname relam
-  ,pts.spcname reltablespace
-  ,ptoast.relname reltoastrelid
+  coalesce(pc.relname, '') relname
+  ,coalesce(pn.nspname, '') relnamespace
+  ,coalesce(pt.typname, '') reltype
+  ,coalesce(pto.typname, '') reloftype
+  ,coalesce(po.rolname, '') relowner
+  ,coalesce(pam.amname, '') relam
+  ,coalesce(pts.spcname, '') reltablespace
+  ,coalesce(ptoast.relname, '') reltoastrelid
 FROM pg_class pc
 JOIN pg_namespace pn ON pn.oid=pc.relnamespace
 JOIN pg_type pt ON pt.oid=pc.reltype
@@ -99,8 +116,28 @@ WHERE pc.relkind='r' AND pn.nspname != 'pg_catalog' AND pn.nspname != 'informati
       reltoastrelid,
       relowner string
     
-    r.Scan(&relname, &relnamespace, &reltype, &reloftype, &relam, &reltablespace, &reltoastrelid, &relowner)
-    tables = append(tables, PgTable { relname, relnamespace, reltype, reloftype, relam, reltablespace, reltoastrelid, relowner })
+    err := r.Scan(
+      &relname, 
+      &relnamespace, 
+      &reltype, 
+      &reloftype, 
+      &relowner,
+      &relam, 
+      &reltablespace, 
+      &reltoastrelid, 
+    )
+    perr(err)
+
+    tables = append(tables, PgTable { 
+      relname: relname, 
+      relnamespace: relnamespace, 
+      reltype: reltype, 
+      reloftype: reloftype, 
+      relam: relam, 
+      reltablespace: reltablespace, 
+      reltoastrelid: reltoastrelid, 
+      relowner: relowner,
+    })
   }
 
   return tables
