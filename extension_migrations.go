@@ -11,43 +11,33 @@ type DiffableExtensions struct {
 }
 
 func (x *DiffableExtensions) GetCurrentNames() []string {
-  var names []string
-
-  for _, n := range x.current_extensions {
-    names = append(names, n.extname)
-  }
-
-  return names
+  return build_string_array[PgExtension](x.current_extensions, func(x PgExtension) string {
+    return x.extname
+  })
 }
 
 func (x *DiffableExtensions) GetNewNames() []string {
-  var names []string
-
-  for _, n := range x.new_extensions {
-    names = append(names, n.extname)
-  }
-
-  return names
+  return build_string_array[PgExtension](x.new_extensions, func(x PgExtension) string {
+    return x.extname
+  })
 }
 
 func (x *DiffableExtensions) GenerateDropStmts(ctx *Context) []string {
-  var drops []string
-
-  for _, v := range compute_removed_objects(x) {
-    drops = append(drops, fmt.Sprintf("DROP EXTENSION IF EXISTS %s;", v))
-  }
-
-  return drops
+  return build_string_array[string](
+    compute_removed_objects(x),
+    func(x string) string {
+      return fmt.Sprintf("DROP EXTENSION IF EXISTS %s;", x)
+    },
+  )
 }
 
 func (x *DiffableExtensions) GenerateAddStmts(ctx *Context) []string {
-  var adds []string
-
-  for _, v := range compute_added_objects(x) {
-    adds = append(adds, fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s;", v))
-  }
-
-  return adds
+  return build_string_array[string](
+    compute_added_objects(x),
+    func(x string) string {
+      return fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s;", x)
+    },
+  )
 }
 
 func (x *DiffableExtensions) GenerateUpdateStmts(ctx *Context) []string {
@@ -59,9 +49,6 @@ type PgExtension struct {
   extname string
 }
 
-func (x *PgExtension) Rep() string {
-  return x.extname
-}
 
 func get_list_of_extensions(db *sql.DB) []PgExtension {
   var extensions []PgExtension

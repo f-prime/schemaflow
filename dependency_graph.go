@@ -166,9 +166,15 @@ func unroll_statement_dependencies(stmt *ParsedStmt, stmts []*ParsedStmt) []*Par
 }
 
 func sort_stmts_by_priority(stmts []*ParsedStmt) []*ParsedStmt {
+  seen := make(map[string]bool)
+
   sorted_stmts := make([]*ParsedStmt, 0)
 
   for _, sch := range stmts {
+    if seen[sch.hash] {
+      continue
+    }
+
     if sch.stmt_type == SCHEMA {
       sorted_stmts = append(sorted_stmts, sch)
       sch.handled = true
@@ -176,6 +182,10 @@ func sort_stmts_by_priority(stmts []*ParsedStmt) []*ParsedStmt {
   }
 
   for _, ext := range stmts {
+    if seen[ext.hash] {
+      continue
+    }
+
     if ext.stmt_type == EXTENSION {
       sorted_stmts = append(sorted_stmts, ext)
       ext.handled = true
@@ -183,6 +193,10 @@ func sort_stmts_by_priority(stmts []*ParsedStmt) []*ParsedStmt {
   }
 
   for _, s := range stmts {
+    if seen[s.hash] {
+      continue
+    }
+
     if !s.handled {
       sorted_stmts = append(sorted_stmts, unroll_statement_dependencies(s, stmts)...)
     }
@@ -605,6 +619,18 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       for _, role := range roles {
         hydrate_stmt_object(role, ps)
       }
+    }
+
+    case *pg_query.Node_CreateRoleStmt: {
+      cs := n.CreateRoleStmt
+
+      ps.name = n.CreateRoleStmt.GetRole()
+      ps.stmt_type = ROLE
+
+      for _, o := range cs.GetOptions() {
+        hydrate_stmt_object(o, ps)
+      }
+    
     }
 
     case *pg_query.Node_GrantRoleStmt: {

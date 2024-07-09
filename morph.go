@@ -266,8 +266,8 @@ func main() {
   ctx := parse_args()
   db_conn, migration_db_conn := create_db_connections(ctx.db_context)
 
-  defer db_conn.Close()
   defer migration_db_conn.Close()
+  defer db_conn.Close()
 
   ctx.db = db_conn
   db_tx, te := ctx.db.Begin()

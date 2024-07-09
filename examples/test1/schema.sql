@@ -1,4 +1,9 @@
 create extension pg_trgm;
+create schema mine;
+
+create table mine.help (
+  id serial primary key
+);
 
 create table person (
   id serial primary key,
