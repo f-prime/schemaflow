@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"reflect"
@@ -28,22 +28,22 @@ func TestViewDependency(t *testing.T) {
   t.Run("view dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(SCHEMA, "abc" ),
-      *build_dependency(GENERIC_TYPE, "my_domain"),
-      *build_dependency(TABLE, "a_cool_table"),
-      *build_dependency(TABLE, "b_cool_table"),
-      *build_dependency(TABLE, "c_cool_table"),
-      *build_dependency(TABLE, "d_cool_table"),
-      *build_dependency(FUNCTION, "some_other_function" ),
+      *buildDependency(SCHEMA, "abc" ),
+      *buildDependency(GENERIC_TYPE, "my_domain"),
+      *buildDependency(TABLE, "a_cool_table"),
+      *buildDependency(TABLE, "b_cool_table"),
+      *buildDependency(TABLE, "c_cool_table"),
+      *buildDependency(TABLE, "d_cool_table"),
+      *buildDependency(FUNCTION, "some_other_function" ),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -62,17 +62,17 @@ func TestTableForeignKeyDependency(t *testing.T) {
   t.Run("table foreign key dependency", func(t *testing.T) {
     fke_parsed, e := pg_query.Parse(foreign_key_example)
     perr(e)
-    stmts := extract_stmts(fke_parsed)
+    stmts := ExtractStmts(fke_parsed)
     ps := stmts[0]
 
     correct := []Dependency {
-      *build_dependency(GENERIC_TYPE, "int4" ),
-      *build_dependency(TABLE, "parent_table" ),
+      *buildDependency(GENERIC_TYPE, "int4" ),
+      *buildDependency(TABLE, "parent_table" ),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -92,17 +92,17 @@ func TestTableInheritedDependency(t *testing.T) {
   t.Run("table inherited dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(inherited_table_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency {
-      *build_dependency(GENERIC_TYPE, "int4"),
-      *build_dependency(TABLE, "parent_table"),
+      *buildDependency(GENERIC_TYPE, "int4"),
+      *buildDependency(TABLE, "parent_table"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -121,16 +121,16 @@ func TestTablePartitionDependency(t *testing.T) {
   t.Run("table partition dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(partition_table_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(TABLE, "parent_table"),
+      *buildDependency(TABLE, "parent_table"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -149,17 +149,17 @@ func TestTableFunctionDependency(t *testing.T) {
   t.Run("table function dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(default_function_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(GENERIC_TYPE, "uuid"),
-      *build_dependency(FUNCTION, "uuid_generate_v4"),
+      *buildDependency(GENERIC_TYPE, "uuid"),
+      *buildDependency(FUNCTION, "uuid_generate_v4"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -179,17 +179,17 @@ func TestTableSequenceDependency(t *testing.T) {
   t.Run("table sequence dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(default_function_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(GENERIC_TYPE, "int4"),
-      *build_dependency(SEQUENCE, "example_sequence"),
+      *buildDependency(GENERIC_TYPE, "int4"),
+      *buildDependency(SEQUENCE, "example_sequence"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -209,16 +209,16 @@ func TestTableCustomTypeDependency(t *testing.T) {
   t.Run("table domain dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(GENERIC_TYPE, "positive_integer"),
+      *buildDependency(GENERIC_TYPE, "positive_integer"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -238,17 +238,17 @@ func TestTableCollateDependency(t *testing.T) {
   t.Run("table collate dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(COLLATION, "romanian_phonebook"),
-      *build_dependency(GENERIC_TYPE, "text"),
+      *buildDependency(COLLATION, "romanian_phonebook"),
+      *buildDependency(GENERIC_TYPE, "text"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -268,17 +268,17 @@ func TestTableSchemaDependency(t *testing.T) {
   t.Run("table schema dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(SCHEMA, "my_schema"),
-      *build_dependency(GENERIC_TYPE, "int4"),
+      *buildDependency(SCHEMA, "my_schema"),
+      *buildDependency(GENERIC_TYPE, "int4"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -298,17 +298,17 @@ func TestTableTablespaceDependency(t *testing.T) {
   t.Run("table tablespace dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(TABLESPACE, "example_tablespace"),
-      *build_dependency(GENERIC_TYPE, "int4"),
+      *buildDependency(TABLESPACE, "example_tablespace"),
+      *buildDependency(GENERIC_TYPE, "int4"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -327,21 +327,21 @@ func TestInsertDependency(t *testing.T) {
   t.Run("table insert dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(insert_example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(SCHEMA, "cc"),
-      *build_dependency(TABLE, "abc"),
-      *build_dependency(FUNCTION, "call_this_func"),
-      *build_dependency(FUNCTION, "with_this_nested_call"),
-      *build_dependency(GENERIC_TYPE, "my_custom_number_type"),
-      *build_dependency(TABLE, "some_other_table"),
+      *buildDependency(SCHEMA, "cc"),
+      *buildDependency(TABLE, "abc"),
+      *buildDependency(FUNCTION, "call_this_func"),
+      *buildDependency(FUNCTION, "with_this_nested_call"),
+      *buildDependency(GENERIC_TYPE, "my_custom_number_type"),
+      *buildDependency(TABLE, "some_other_table"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -360,21 +360,21 @@ func TestWithDependency(t *testing.T) {
   t.Run("with dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(FUNCTION, "my_func"),
-      *build_dependency(TABLE, "first"),
-      *build_dependency(TABLE, "second"),
-      *build_dependency(TABLE, "qvc"),
-      *build_dependency(GENERIC_TYPE, "ct"),
-      *build_dependency(TABLE, "abc"),
+      *buildDependency(FUNCTION, "my_func"),
+      *buildDependency(TABLE, "first"),
+      *buildDependency(TABLE, "second"),
+      *buildDependency(TABLE, "qvc"),
+      *buildDependency(GENERIC_TYPE, "ct"),
+      *buildDependency(TABLE, "abc"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 
@@ -393,16 +393,16 @@ func TestCommentDependency(t *testing.T) {
   t.Run("with dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(example)
     perr(e)
-    stmts := extract_stmts(ite_parsed)
+    stmts := ExtractStmts(ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
-      *build_dependency(TABLE, "some_other_table"),
+      *buildDependency(TABLE, "some_other_table"),
     }
 
     var checked []Dependency
 
-    for _, c := range ps.dependencies {
+    for _, c := range ps.Dependencies {
       checked = append(checked, *c)
     }
 

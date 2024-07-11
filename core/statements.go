@@ -1,31 +1,14 @@
-package main
+package core
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
-func hash_string(s string) string {
-  h := sha1.New()
-  h.Write([]byte(s))
-  r := h.Sum(nil)
-  return hex.EncodeToString(r)
-}
-
-func hash_file(p string) string {
-  data, e := os.ReadFile(p)
-  perr(e)
-  sdata := string(data)
-  return hash_string(sdata) 
-}
-
-func pg_aconst_to_string(ac *pg_query.A_Const) string {
+func pgAconstToString(ac *pg_query.A_Const) string {
   if ac.GetIsnull() {
     return "NULL"
   } else {
@@ -53,7 +36,7 @@ func pg_aconst_to_string(ac *pg_query.A_Const) string {
   }
 }
 
-func pg_nodes_to_string(nodes []*pg_query.Node) string {
+func pgNodesToString(nodes []*pg_query.Node) string {
   if len(nodes) == 0 {
     return ""
   }
@@ -69,7 +52,7 @@ func pg_nodes_to_string(nodes []*pg_query.Node) string {
   //return strings.Join(name, ".")
 }
 
-func pg_rangevar_to_string(rv *pg_query.RangeVar) string {
+func pgRangevarToString(rv *pg_query.RangeVar) string {
   //sn := rv.GetSchemaname()
 
   //if len(sn) == 0 {
@@ -79,7 +62,7 @@ func pg_rangevar_to_string(rv *pg_query.RangeVar) string {
   return rv.GetRelname()
 }
 
-func pg_typename_to_string(tn *pg_query.TypeName) string {
+func pgTypenameToString(tn *pg_query.TypeName) string {
   names := tn.GetNames()
 
   var name []string;
@@ -99,13 +82,13 @@ func pg_typename_to_string(tn *pg_query.TypeName) string {
   return strings.Join(name, ".")
 }
 
-func pg_list_to_string(tn *pg_query.List) string {
+func pgListToString(tn *pg_query.List) string {
   items := tn.GetItems()
 
-  return pg_nodes_to_string(items)
+  return pgNodesToString(items)
 }
 
-func build_name(names ...string) string {
+func buildName(names ...string) string {
   var cleaned_names []string
 
   for _, name := range names {
@@ -117,37 +100,37 @@ func build_name(names ...string) string {
   return strings.Join(cleaned_names, ".")
 }
 
-func build_dependency(t StmtType, name string) *Dependency {
+func buildDependency(t StmtType, name string) *Dependency {
   return &Dependency { t, name, nil }
 }
 
-func append_dependency(ps *ParsedStmt, t StmtType, name string) {
+func appendDependency(ps *ParsedStmt, t StmtType, name string) {
   if name == "" {
     return
   }
 
-  for _, d := range ps.dependencies {
-    if d.stmt_name == name && d.stmt_type == t {
+  for _, d := range ps.Dependencies {
+    if d.StmtName == name && d.StmtType == t {
       return
     }
   }
 
-  ps.dependencies = append(ps.dependencies, build_dependency(t, name))
+  ps.Dependencies = append(ps.Dependencies, buildDependency(t, name))
 }
 
-func append_rangevar_dependency(ps *ParsedStmt, rv *pg_query.RangeVar) {
+func appendRangevarDependency(ps *ParsedStmt, rv *pg_query.RangeVar) {
   schema := rv.GetSchemaname()
 
-  append_dependency(ps, SCHEMA, schema)
-  append_dependency(ps, TABLE, pg_rangevar_to_string(rv))
+  appendDependency(ps, SCHEMA, schema)
+  appendDependency(ps, TABLE, pgRangevarToString(rv))
 }
 
 
 
-func unroll_statement_dependencies(stmt *ParsedStmt, stmts []*ParsedStmt) []*ParsedStmt {
+func unrollStatementDependencies(stmt *ParsedStmt, stmts []*ParsedStmt) []*ParsedStmt {
   unrolled := make([]*ParsedStmt, 0) 
 
-  if stmt.handled {
+  if stmt.Handled {
     return unrolled
   }
 
@@ -155,89 +138,89 @@ func unroll_statement_dependencies(stmt *ParsedStmt, stmts []*ParsedStmt) []*Par
     return unrolled
   }
 
-  for _, dep := range stmt.dependencies {
-    unrolled = append(unrolled, unroll_statement_dependencies(dep.dependency, stmts)...) 
+  for _, dep := range stmt.Dependencies {
+    unrolled = append(unrolled, unrollStatementDependencies(dep.Dependency, stmts)...) 
   }
 
-  stmt.handled = true
+  stmt.Handled = true
   unrolled = append(unrolled, stmt)
 
   return unrolled
 }
 
-func sort_stmts_by_priority(stmts []*ParsedStmt) []*ParsedStmt {
+func SortStmtsByPriority(stmts []*ParsedStmt) []*ParsedStmt {
   seen := make(map[string]bool)
 
   sorted_stmts := make([]*ParsedStmt, 0)
 
   for _, sch := range stmts {
-    if seen[sch.hash] {
+    if seen[sch.Hash] {
       continue
     }
 
-    if sch.stmt_type == SCHEMA {
+    if sch.StmtType == SCHEMA {
       sorted_stmts = append(sorted_stmts, sch)
-      sch.handled = true
+      sch.Handled = true
     }
   }
 
   for _, ext := range stmts {
-    if seen[ext.hash] {
+    if seen[ext.Hash] {
       continue
     }
 
-    if ext.stmt_type == EXTENSION {
+    if ext.StmtType == EXTENSION {
       sorted_stmts = append(sorted_stmts, ext)
-      ext.handled = true
+      ext.Handled = true
     }
   }
 
   for _, s := range stmts {
-    if seen[s.hash] {
+    if seen[s.Hash] {
       continue
     }
 
-    if !s.handled {
-      sorted_stmts = append(sorted_stmts, unroll_statement_dependencies(s, stmts)...)
+    if !s.Handled {
+      sorted_stmts = append(sorted_stmts, unrollStatementDependencies(s, stmts)...)
     }
   }
 
   return sorted_stmts
 }
 
-func hydrate_dependencies(stmts []*ParsedStmt) {
+func hydrateDependencies(stmts []*ParsedStmt) {
   for _, p1 := range stmts {
     var valid_deps []*Dependency
-    for _, dep := range p1.dependencies {
+    for _, dep := range p1.Dependencies {
       for _, p2 := range stmts {
-        if p2.name == dep.stmt_name {
-          if p2.stmt_type == dep.stmt_type {
-            dep.dependency = p2
+        if p2.Name == dep.StmtName {
+          if p2.StmtType == dep.StmtType {
+            dep.Dependency = p2
             break
-          } else if p2.stmt_type == GENERIC_TYPE {
-            if dep.stmt_type == DOMAIN || dep.stmt_type == TYPE || dep.stmt_type == ENUM {
-              dep.dependency = p2
+          } else if p2.StmtType == GENERIC_TYPE {
+            if dep.StmtType == DOMAIN || dep.StmtType == TYPE || dep.StmtType == ENUM {
+              dep.Dependency = p2
               break
             }
-          } else if dep.stmt_type == GENERIC_TYPE {
-            if p2.stmt_type == DOMAIN || p2.stmt_type == TYPE || p2.stmt_type == ENUM {
-              dep.dependency = p2
+          } else if dep.StmtType == GENERIC_TYPE {
+            if p2.StmtType == DOMAIN || p2.StmtType == TYPE || p2.StmtType == ENUM {
+              dep.Dependency = p2
               break
             }
           }
         }
       }
 
-      if dep.dependency != nil {
+      if dep.Dependency != nil {
         valid_deps = append(valid_deps, dep)
       }
     }
 
-    p1.dependencies = valid_deps
+    p1.Dependencies = valid_deps
   }
 }
 
-func object_type_to_stmt_type(ot pg_query.ObjectType) StmtType {
+func objectTypeToStmtType(ot pg_query.ObjectType) StmtType {
   switch ot {
     case pg_query.ObjectType_OBJECT_ACCESS_METHOD:
         return ACCESS_METHOD
@@ -330,37 +313,37 @@ func object_type_to_stmt_type(ot pg_query.ObjectType) StmtType {
   }
 }
 
-func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
+func hydrateStmtObject(node *pg_query.Node, ps *ParsedStmt) {
   if node == nil || node.GetNode() == nil {
     return
   }
 
   switch n := node.Node.(type) {
     case *pg_query.Node_CreateStmt: {
-      ps.stmt_type = TABLE
+      ps.StmtType = TABLE
 
       relation := n.CreateStmt.GetRelation()
-      ps.name = pg_rangevar_to_string(relation)
+      ps.Name = pgRangevarToString(relation)
 
-      append_dependency(ps, SCHEMA, relation.GetSchemaname())
+      appendDependency(ps, SCHEMA, relation.GetSchemaname())
 
       table_elts := n.CreateStmt.GetTableElts()
       constraints := n.CreateStmt.GetConstraints()
       inherited := n.CreateStmt.GetInhRelations()
       tablespace := n.CreateStmt.GetTablespacename()
 
-      append_dependency(ps, TABLESPACE, tablespace)
+      appendDependency(ps, TABLESPACE, tablespace)
 
       for _, elt := range table_elts {
-        hydrate_stmt_object(elt, ps)
+        hydrateStmtObject(elt, ps)
       }
 
       for _, constraint := range constraints {
-        hydrate_stmt_object(constraint, ps)
+        hydrateStmtObject(constraint, ps)
       }
 
       for _, inherited := range inherited {
-        hydrate_stmt_object(inherited, ps)
+        hydrateStmtObject(inherited, ps)
       }
     }
 
@@ -368,24 +351,24 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       rel := n.CreateTableAsStmt.GetInto().GetRel()  
       query := n.CreateTableAsStmt.GetQuery()
 
-      ps.name = pg_rangevar_to_string(rel)
-      ps.stmt_type = MATERIALIZED_VIEW
+      ps.Name = pgRangevarToString(rel)
+      ps.StmtType = MATERIALIZED_VIEW
 
-      append_dependency(ps, SCHEMA, rel.GetSchemaname())
+      appendDependency(ps, SCHEMA, rel.GetSchemaname())
 
-      hydrate_stmt_object(query, ps)
+      hydrateStmtObject(query, ps)
     }
 
     case *pg_query.Node_ViewStmt: {
       schema_name := n.ViewStmt.View.GetSchemaname()
       rel_name := n.ViewStmt.View.GetRelname()
 
-      ps.name = build_name(schema_name, rel_name)
-      ps.stmt_type = VIEW
+      ps.Name = buildName(schema_name, rel_name)
+      ps.StmtType = VIEW
 
-      append_dependency(ps, SCHEMA, schema_name)
+      appendDependency(ps, SCHEMA, schema_name)
 
-      hydrate_stmt_object(n.ViewStmt.Query, ps)
+      hydrateStmtObject(n.ViewStmt.Query, ps)
     }
 
     case *pg_query.Node_CaseWhen: {
@@ -394,110 +377,110 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       expr := cw.GetExpr()
       result := cw.GetResult()
 
-      hydrate_stmt_object(expr, ps)
-      hydrate_stmt_object(result, ps)
+      hydrateStmtObject(expr, ps)
+      hydrateStmtObject(result, ps)
     }
 
     case *pg_query.Node_NullTest: {
       arg := n.NullTest.GetArg()
-      hydrate_stmt_object(arg, ps)
+      hydrateStmtObject(arg, ps)
     }
 
     case *pg_query.Node_CoalesceExpr: {
       ce := n.CoalesceExpr
-      hydrate_stmt_object(ce.GetXpr(), ps)
+      hydrateStmtObject(ce.GetXpr(), ps)
       for _, arg := range ce.GetArgs() {
-        hydrate_stmt_object(arg, ps)
+        hydrateStmtObject(arg, ps)
       }
     }
 
     case *pg_query.Node_MinMaxExpr: {
       mme := n.MinMaxExpr
       for _, arg := range mme.GetArgs() {
-        hydrate_stmt_object(arg, ps)
+        hydrateStmtObject(arg, ps)
       }
 
-      hydrate_stmt_object(mme.GetXpr(), ps)
+      hydrateStmtObject(mme.GetXpr(), ps)
     }
 
     case *pg_query.Node_RangeFunction: {
       rf := n.RangeFunction
 
       for _, cfl := range rf.GetColdeflist() {
-        hydrate_stmt_object(cfl, ps)
+        hydrateStmtObject(cfl, ps)
       }
 
       for _, fun := range rf.GetFunctions() {
-        hydrate_stmt_object(fun, ps)
+        hydrateStmtObject(fun, ps)
       }
     }
 
     case *pg_query.Node_SubLink: {
       sl := n.SubLink 
 
-      hydrate_stmt_object(sl.GetTestexpr(), ps)
-      hydrate_stmt_object(sl.GetXpr(), ps)
-      hydrate_stmt_object(sl.GetSubselect(), ps)
+      hydrateStmtObject(sl.GetTestexpr(), ps)
+      hydrateStmtObject(sl.GetXpr(), ps)
+      hydrateStmtObject(sl.GetSubselect(), ps)
 
       for _, on := range sl.GetOperName() {
-        hydrate_stmt_object(on, ps)
+        hydrateStmtObject(on, ps)
       }
     }
 
     case *pg_query.Node_CaseExpr: {
-      ps.stmt_type = CASE
+      ps.StmtType = CASE
 
       ce := n.CaseExpr
 
       dr := ce.GetDefresult()
 
-      hydrate_stmt_object(dr, ps)
+      hydrateStmtObject(dr, ps)
 
       for _, arg := range ce.GetArgs() {
-        hydrate_stmt_object(arg, ps)
+        hydrateStmtObject(arg, ps)
       }
 
     }
 
     case *pg_query.Node_CommonTableExpr: {
       query := n.CommonTableExpr.GetCtequery()
-      hydrate_stmt_object(query, ps)
+      hydrateStmtObject(query, ps)
     }
 
     case *pg_query.Node_VariableSetStmt: {
-      ps.stmt_type = VARIABLE 
-      ps.name = n.VariableSetStmt.GetName()
+      ps.StmtType = VARIABLE 
+      ps.Name = n.VariableSetStmt.GetName()
 
       args := n.VariableSetStmt.GetArgs()
 
       for _, arg := range args {
-        hydrate_stmt_object(arg, ps)
+        hydrateStmtObject(arg, ps)
       }
     }
 
     case *pg_query.Node_CreateSchemaStmt: {
-      ps.stmt_type = SCHEMA
-      ps.name = n.CreateSchemaStmt.GetSchemaname()
+      ps.StmtType = SCHEMA
+      ps.Name = n.CreateSchemaStmt.GetSchemaname()
     }
 
     case *pg_query.Node_CreateFunctionStmt: {
-      func_name := pg_nodes_to_string(n.CreateFunctionStmt.GetFuncname())
-      rtype := pg_nodes_to_string(n.CreateFunctionStmt.GetReturnType().GetNames())
+      func_name := pgNodesToString(n.CreateFunctionStmt.GetFuncname())
+      rtype := pgNodesToString(n.CreateFunctionStmt.GetReturnType().GetNames())
 
-      ps.stmt_type = FUNCTION
-      ps.name = func_name
+      ps.StmtType = FUNCTION
+      ps.Name = func_name
 
-      append_dependency(ps, GENERIC_TYPE, rtype)
+      appendDependency(ps, GENERIC_TYPE, rtype)
 
       options := n.CreateFunctionStmt.GetOptions()
       parameters := n.CreateFunctionStmt.GetParameters()
 
       for _, option := range options {
-        hydrate_stmt_object(option, ps)
+        hydrateStmtObject(option, ps)
       }
 
       for _, parameter := range parameters {
-        hydrate_stmt_object(parameter, ps)
+        hydrateStmtObject(parameter, ps)
       }
     }
 
@@ -505,7 +488,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       arg_type := n.FunctionParameter.GetArgType()
 
       for _, name := range arg_type.GetNames() {
-        hydrate_stmt_object(name, ps)
+        hydrateStmtObject(name, ps)
       }
     }
 
@@ -515,56 +498,56 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_RoleSpec: {
       name := n.RoleSpec.GetRolename()
-      append_dependency(ps, ROLE, name)
+      appendDependency(ps, ROLE, name)
     }
 
     case *pg_query.Node_CreateEnumStmt: {
       enum := n.CreateEnumStmt
 
-      ps.stmt_type = ENUM
-      ps.name = pg_nodes_to_string(enum.GetTypeName())
+      ps.StmtType = ENUM
+      ps.Name = pgNodesToString(enum.GetTypeName())
     }
 
     case *pg_query.Node_CreateDomainStmt: {
       dname := n.CreateDomainStmt.GetDomainname()
       constraints := n.CreateDomainStmt.GetConstraints()
 
-      ps.stmt_type = DOMAIN
-      ps.name = pg_nodes_to_string(dname)
+      ps.StmtType = DOMAIN
+      ps.Name = pgNodesToString(dname)
 
       type_name := n.CreateDomainStmt.GetTypeName()
 
-      append_dependency(ps, GENERIC_TYPE, pg_typename_to_string(type_name))
+      appendDependency(ps, GENERIC_TYPE, pgTypenameToString(type_name))
 
       for _, constraint := range constraints {
-        hydrate_stmt_object(constraint, ps)
+        hydrateStmtObject(constraint, ps)
       }
       
     }
 
     case *pg_query.Node_DropStmt: {
-      ps.stmt_type = DROP
+      ps.StmtType = DROP
 
       ds := n.DropStmt 
       ds.GetRemoveType()
       for _, object := range ds.GetObjects() {
-        ln := pg_list_to_string(object.GetList())
-        append_dependency(ps, object_type_to_stmt_type(ds.GetRemoveType()), ln)
+        ln := pgListToString(object.GetList())
+        appendDependency(ps, objectTypeToStmtType(ds.GetRemoveType()), ln)
       }
     }
 
     case *pg_query.Node_CreateExtensionStmt: {
-      ps.stmt_type = EXTENSION
-      ps.name = n.CreateExtensionStmt.GetExtname()
+      ps.StmtType = EXTENSION
+      ps.Name = n.CreateExtensionStmt.GetExtname()
     }
 
     case *pg_query.Node_ObjectWithArgs: {
       objname := n.ObjectWithArgs.GetObjname()
-      append_dependency(ps, FUNCTION, pg_nodes_to_string(objname))
+      appendDependency(ps, FUNCTION, pgNodesToString(objname))
     }
 
     case *pg_query.Node_GrantStmt: {
-      ps.stmt_type = GRANT
+      ps.StmtType = GRANT
 
       objs := n.GrantStmt.GetObjects()
 
@@ -572,15 +555,15 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       grantees := n.GrantStmt.GetGrantees()
 
       for _, obj := range objs {
-        hydrate_stmt_object(obj, ps)
+        hydrateStmtObject(obj, ps)
       }
 
       for _, priv := range privs {
-        hydrate_stmt_object(priv, ps)
+        hydrateStmtObject(priv, ps)
       }
 
       for _, grantee := range grantees {
-        hydrate_stmt_object(grantee, ps)
+        hydrateStmtObject(grantee, ps)
       }
     }
 
@@ -595,57 +578,57 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     case *pg_query.Node_CreateTrigStmt: {
       rel := n.CreateTrigStmt.GetRelation()
 
-      ps.name = n.CreateTrigStmt.GetTrigname()
-      ps.stmt_type = TRIGGER
+      ps.Name = n.CreateTrigStmt.GetTrigname()
+      ps.StmtType = TRIGGER
 
-      fname := pg_nodes_to_string(n.CreateTrigStmt.GetFuncname())
-      append_rangevar_dependency(ps, rel)
-      append_dependency(ps, FUNCTION, fname)
+      fname := pgNodesToString(n.CreateTrigStmt.GetFuncname())
+      appendRangevarDependency(ps, rel)
+      appendDependency(ps, FUNCTION, fname)
     }
 
     case *pg_query.Node_CreatePolicyStmt: {
-      ps.name = n.CreatePolicyStmt.GetPolicyName()
-      ps.stmt_type = POLICY
+      ps.Name = n.CreatePolicyStmt.GetPolicyName()
+      ps.StmtType = POLICY
 
       table := n.CreatePolicyStmt.GetTable()
 
       roles := n.CreatePolicyStmt.GetRoles()
       qual := n.CreatePolicyStmt.GetQual()
 
-      hydrate_stmt_object(qual, ps)
+      hydrateStmtObject(qual, ps)
 
-      append_rangevar_dependency(ps, table)
+      appendRangevarDependency(ps, table)
 
       for _, role := range roles {
-        hydrate_stmt_object(role, ps)
+        hydrateStmtObject(role, ps)
       }
     }
 
     case *pg_query.Node_CreateRoleStmt: {
       cs := n.CreateRoleStmt
 
-      ps.name = n.CreateRoleStmt.GetRole()
-      ps.stmt_type = ROLE
+      ps.Name = n.CreateRoleStmt.GetRole()
+      ps.StmtType = ROLE
 
       for _, o := range cs.GetOptions() {
-        hydrate_stmt_object(o, ps)
+        hydrateStmtObject(o, ps)
       }
     
     }
 
     case *pg_query.Node_GrantRoleStmt: {
-      ps.stmt_type = GRANT
+      ps.StmtType = GRANT
 
       grs := n.GrantRoleStmt
       roles := grs.GetGrantedRoles()
       groles := grs.GetGranteeRoles()
 
       for _, role := range roles {
-        hydrate_stmt_object(role, ps)
+        hydrateStmtObject(role, ps)
       }
 
       for _, grole := range groles {
-        hydrate_stmt_object(grole, ps)
+        hydrateStmtObject(grole, ps)
       }
     }
 
@@ -654,7 +637,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_AlterDefaultPrivilegesStmt: {
-      ps.stmt_type = ALTER_DEFAULT_PRIVILEGES
+      ps.StmtType = ALTER_DEFAULT_PRIVILEGES
       adps := n.AlterDefaultPrivilegesStmt
       action := adps.GetAction()
 
@@ -662,18 +645,18 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       privs := action.GetPrivileges()
 
       for _, g := range grantees {
-        hydrate_stmt_object(g, ps)
+        hydrateStmtObject(g, ps)
       }
 
       for _, p := range privs {
-        hydrate_stmt_object(p, ps)
+        hydrateStmtObject(p, ps)
       }
 
 
     }
 
     case *pg_query.Node_AlterTableStmt: {
-      ps.stmt_type = ALTER_TABLE
+      ps.StmtType = ALTER_TABLE
 
       relation := n.AlterTableStmt.GetRelation()
       schema_name := relation.GetSchemaname()
@@ -682,11 +665,11 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       cmds := n.AlterTableStmt.GetCmds()
 
       for _, cmd := range cmds {
-        hydrate_stmt_object(cmd, ps)
+        hydrateStmtObject(cmd, ps)
       }
 
-      append_dependency(ps, SCHEMA, schema_name)
-      append_dependency(ps, TABLE, table)
+      appendDependency(ps, SCHEMA, schema_name)
+      appendDependency(ps, TABLE, table)
     }
 
     case *pg_query.Node_IndexElem: {
@@ -694,22 +677,22 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     case *pg_query.Node_IndexStmt: {
-      ps.name = n.IndexStmt.GetIdxname()
-      ps.stmt_type = INDEX
+      ps.Name = n.IndexStmt.GetIdxname()
+      ps.StmtType = INDEX
 
       relation := n.IndexStmt.GetRelation()
-      append_dependency(ps, SCHEMA, relation.GetSchemaname())
+      appendDependency(ps, SCHEMA, relation.GetSchemaname())
 
       for _, ip := range n.IndexStmt.GetIndexParams() {
-        hydrate_stmt_object(ip, ps)
+        hydrateStmtObject(ip, ps)
       }
     }
 
     case *pg_query.Node_DoStmt: {
-      ps.stmt_type = DO
+      ps.StmtType = DO
 
       for _, arg := range n.DoStmt.GetArgs() {
-        hydrate_stmt_object(arg, ps)
+        hydrateStmtObject(arg, ps)
       }
 
     }
@@ -722,39 +705,39 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       items := n.List.GetItems()
 
       for _, item := range items {
-        hydrate_stmt_object(item, ps)
+        hydrateStmtObject(item, ps)
       }
     }
 
     case *pg_query.Node_CompositeTypeStmt: {
       tv := n.CompositeTypeStmt.GetTypevar()
-      name := pg_rangevar_to_string(tv)
+      name := pgRangevarToString(tv)
 
-      ps.name = name
-      ps.stmt_type = TYPE
+      ps.Name = name
+      ps.StmtType = TYPE
 
-      append_dependency(ps, SCHEMA, tv.GetSchemaname())
+      appendDependency(ps, SCHEMA, tv.GetSchemaname())
 
       for _, cd := range n.CompositeTypeStmt.GetColdeflist() {
-        hydrate_stmt_object(cd, ps)
+        hydrateStmtObject(cd, ps)
       }
     }
 
     case *pg_query.Node_CommentStmt: {
       cmt := n.CommentStmt.GetObject()
 
-      name := pg_list_to_string(cmt.GetList())
+      name := pgListToString(cmt.GetList())
 
-      ps.name = n.CommentStmt.GetComment()
-      ps.stmt_type = COMMENT
+      ps.Name = n.CommentStmt.GetComment()
+      ps.StmtType = COMMENT
 
-      append_dependency(ps, object_type_to_stmt_type(n.CommentStmt.GetObjtype()), name)
+      appendDependency(ps, objectTypeToStmtType(n.CommentStmt.GetObjtype()), name)
 
-      hydrate_stmt_object(cmt, ps)
+      hydrateStmtObject(cmt, ps)
     }
 
     case *pg_query.Node_SelectStmt: {
-      ps.stmt_type = SELECT
+      ps.StmtType = SELECT
 
       targets := n.SelectStmt.GetTargetList()
       from_clauses := n.SelectStmt.GetFromClause()
@@ -762,25 +745,25 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       where_clause := n.SelectStmt.GetWhereClause()
       with_clause := n.SelectStmt.GetWithClause()
 
-      hydrate_stmt_object(where_clause, ps)
+      hydrateStmtObject(where_clause, ps)
 
       for _, target := range targets {
-        hydrate_stmt_object(target, ps)
+        hydrateStmtObject(target, ps)
       }
 
       for _, from_clause := range from_clauses {
-        hydrate_stmt_object(from_clause, ps)
+        hydrateStmtObject(from_clause, ps)
       }
 
       for _, cte := range with_clause.GetCtes() {
-        hydrate_stmt_object(cte, ps)
+        hydrateStmtObject(cte, ps)
       }
 
-      hydrate_stmt_object(having_clause, ps)
+      hydrateStmtObject(having_clause, ps)
     }
 
     case *pg_query.Node_ResTarget: {
-      hydrate_stmt_object(n.ResTarget.GetVal(), ps)
+      hydrateStmtObject(n.ResTarget.GetVal(), ps)
     }
 
     case *pg_query.Node_ColumnRef: {
@@ -791,7 +774,7 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       args := n.BoolExpr.GetArgs()
 
       for _, arg := range args {
-        hydrate_stmt_object(arg, ps)
+        hydrateStmtObject(arg, ps)
       }
     }
 
@@ -799,8 +782,8 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       lexpr := n.AExpr.GetLexpr()
       rexpr := n.AExpr.GetRexpr()
 
-      hydrate_stmt_object(lexpr, ps)
-      hydrate_stmt_object(rexpr, ps)
+      hydrateStmtObject(lexpr, ps)
+      hydrateStmtObject(rexpr, ps)
     }
 
     case *pg_query.Node_AConst: {
@@ -809,69 +792,69 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
 
     case *pg_query.Node_TypeCast: {
       type_name := n.TypeCast.GetTypeName()
-      name_as_string := pg_nodes_to_string(type_name.GetNames())
+      name_as_string := pgNodesToString(type_name.GetNames())
 
       if !strings.HasPrefix(name_as_string, "pg_catalog") {
-        append_dependency(ps, GENERIC_TYPE, name_as_string)
+        appendDependency(ps, GENERIC_TYPE, name_as_string)
       }
     }
 
     case *pg_query.Node_RangeVar: {
-      append_rangevar_dependency(ps, n.RangeVar)
+      appendRangevarDependency(ps, n.RangeVar)
     }
 
     case *pg_query.Node_FuncCall: {
-      name := pg_nodes_to_string(n.FuncCall.GetFuncname()) 
+      name := pgNodesToString(n.FuncCall.GetFuncname()) 
       args := n.FuncCall.GetArgs()
 
       if name == "nextval" {
         if len(args) == 1 {
           seq_name := args[0].GetAConst().GetSval()
-          append_dependency(ps, SEQUENCE, seq_name.GetSval())
+          appendDependency(ps, SEQUENCE, seq_name.GetSval())
         }
 
       } else {
-        append_dependency(ps, FUNCTION, name)
+        appendDependency(ps, FUNCTION, name)
         
         for _, arg := range args {
-          hydrate_stmt_object(arg, ps)
+          hydrateStmtObject(arg, ps)
         }
       }
     }
 
     case *pg_query.Node_RangeSubselect: {
       subquery := n.RangeSubselect.GetSubquery()
-      hydrate_stmt_object(subquery, ps)
+      hydrateStmtObject(subquery, ps)
     }
 
     case *pg_query.Node_ColumnDef: {
       cd := n.ColumnDef
       type_name := cd.GetTypeName()
       names := type_name.GetNames()
-      column_type_name := pg_nodes_to_string(names)
+      column_type_name := pgNodesToString(names)
       constraints := cd.GetConstraints()
 
       colc := cd.GetCollClause()
 
-      append_dependency(ps, COLLATION, pg_nodes_to_string(colc.GetCollname()))
+      appendDependency(ps, COLLATION, pgNodesToString(colc.GetCollname()))
 
       if !strings.HasPrefix(column_type_name, "pg_catalog") {
-        append_dependency(ps, GENERIC_TYPE, column_type_name)
+        appendDependency(ps, GENERIC_TYPE, column_type_name)
       }
 
       for _, constraint := range constraints {
-        hydrate_stmt_object(constraint, ps)
+        hydrateStmtObject(constraint, ps)
       }
     }
 
     case *pg_query.Node_Constraint: {
       pktable := n.Constraint.GetPktable()  
-      pktable_name := pg_rangevar_to_string(pktable)
+      pktable_name := pgRangevarToString(pktable)
       raw_expr := n.Constraint.GetRawExpr()
 
-      append_dependency(ps, TABLE, pktable_name)
+      appendDependency(ps, TABLE, pktable_name)
 
-      hydrate_stmt_object(raw_expr, ps)
+      hydrateStmtObject(raw_expr, ps)
     }
 
     case *pg_query.Node_UpdateStmt: {
@@ -879,82 +862,88 @@ func hydrate_stmt_object(node *pg_query.Node, ps *ParsedStmt) {
       schema := relation.GetSchemaname()
       table := relation.GetRelname()
 
-      log.Printf("table: %v\n", table)
-
-      append_dependency(ps, SCHEMA, schema)
-      append_dependency(ps, TABLE, table)
+      appendDependency(ps, SCHEMA, schema)
+      appendDependency(ps, TABLE, table)
 
       from := n.UpdateStmt.GetFromClause()
       targets := n.UpdateStmt.GetTargetList()
       where := n.UpdateStmt.GetWhereClause()
 
       for _, f := range from {
-        hydrate_stmt_object(f, ps)
+        hydrateStmtObject(f, ps)
       }
 
       for _, t := range targets {
-        hydrate_stmt_object(t, ps)
+        hydrateStmtObject(t, ps)
       }
 
-      hydrate_stmt_object(where, ps)
+      hydrateStmtObject(where, ps)
     }
 
     case *pg_query.Node_JoinExpr: {
       je := n.JoinExpr
       larg := je.GetLarg()
       rarg := je.GetRarg()
-      hydrate_stmt_object(larg, ps)
-      hydrate_stmt_object(rarg, ps)
+      hydrateStmtObject(larg, ps)
+      hydrateStmtObject(rarg, ps)
     }
 
     case *pg_query.Node_InsertStmt: {
       relation := n.InsertStmt.GetRelation()
 
-      append_dependency(ps, SCHEMA, relation.GetSchemaname())
-      append_dependency(ps, TABLE, pg_rangevar_to_string(relation))
+      appendDependency(ps, SCHEMA, relation.GetSchemaname())
+      appendDependency(ps, TABLE, pgRangevarToString(relation))
 
       cols := n.InsertStmt.GetCols()
 
       select_stmt := n.InsertStmt.GetSelectStmt()
 
       for _, c := range cols {
-        hydrate_stmt_object(c, ps)
+        hydrateStmtObject(c, ps)
       }
 
-      hydrate_stmt_object(select_stmt, ps)
+      hydrateStmtObject(select_stmt, ps)
     }
 
     default: {
-      log.Printf("PARSE TREE: %v\n\n", ps.json)
+      log.Printf("PARSE TREE: %v\n\n", ps.Json)
       log.Fatalf("Unknown node type %v\n", node) 
     }
   }
 
-  ps.has_name = ps.name != ""
+  ps.HasName = ps.Name != ""
 }
 
-func extract_stmts(pr *pg_query.ParseResult) []*ParsedStmt {
+func setStmtStatus(ctx *Context, stmts *ParsedStmt) *ParsedStmt {
+  return stmts
+}
+
+func ExtractStmts(ctx *Context, pr *pg_query.ParseResult) []*ParsedStmt {
   var ps []*ParsedStmt
   dependencies := make([]*Dependency, 0)
 
   for _, x := range pr.Stmts {
-    dp, err := deparse_raw_stmt(x)
+    dp, err := DeparseRawStmt(x)
     perr(err)
     json, err := pg_query.ParseToJSON(dp)
     perr(err)
     nps := &ParsedStmt{ 
-      stmt: x, 
-      has_name: false,
-      name: "",
-      deparsed: dp, 
-      json: json,
-      hash: hash_string(dp), 
-      stmt_type: UNKNOWN_TYPE,
-      dependencies: dependencies,
-      handled: false,
-      removed: false,
+      Stmt: x, 
+      HasName: false,
+      Name: "",
+      Deparsed: dp, 
+      Json: json,
+      Hash: HashString(dp), 
+      StmtType: UNKNOWN_TYPE,
+      Dependencies: dependencies,
+      Handled: false,
+      Removed: false,
+      Status: UNKNOWN,
     }
-    hydrate_stmt_object(x.GetStmt(), nps)
+
+    hydrateStmtObject(x.GetStmt(), nps)
+    setStmtStatus(ctx, nps)
+
     ps = append(ps, nps) 
   }
 
