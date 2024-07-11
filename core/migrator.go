@@ -92,17 +92,21 @@ func getRemovedStatementsAndUpdateDb(ctx *Context) []string {
   var removed []string
 
   for _, f := range getListOfStatementsInDb(ctx) {
+    nameFound := false
     hashFound := false
     for _, s := range *ctx.Stmts {
-      if s.Hash == f.stmtHash {
+      if s.Hash == *f.stmtHash {
         hashFound = true
-        break
+      }
+
+      if s.HasName && f.stmtName != nil && s.Name == *f.stmtName {
+        nameFound = true
       }
     }
 
-    if !hashFound {
-      removed = append(removed, f.stmt)
-      removeStmtByHash(ctx, f.stmtHash)
+    if !hashFound && !nameFound {
+      removed = append(removed, *f.stmt)
+      removeStmtByHash(ctx, *f.stmtHash)
     }
   }
 
@@ -146,6 +150,14 @@ func generateDiffComment(ctx *Context, stmt *ParsedStmt) string {
 
 }
 
+func generateRemovedComment(ctx *Context, remove string) string {
+  return fmt.Sprintf(`/*
+%s
+-----------     REMOVED    ----------
+%s
+*/`, VALIDATE_MIGRATIONS_STRING, remove);
+}
+
 func writeMigrationsToNextMigration(ctx *Context) int {
   nextMigrationFile := filepath.Join(ctx.MigrationPath, getNextMigrationFileName(ctx))
 
@@ -166,7 +178,7 @@ func writeMigrationsToNextMigration(ctx *Context) int {
   }
 
   for _, removed := range getRemovedStatementsAndUpdateDb(ctx) {
-    fmt.Printf("removed: %v\n", removed)
+    migrations = append(migrations, generateRemovedComment(ctx, removed))
   }
 
   f, err := os.Create(nextMigrationFile)

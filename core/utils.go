@@ -65,9 +65,9 @@ func ListAllFilesInPath(path string) []string {
 }
 
 type statements struct {
-  stmt string
-  stmtName string
-  stmtHash string
+  stmt *string
+  stmtName *string
+  stmtHash *string
   stmtType int
 }
 
@@ -78,7 +78,7 @@ func getListOfStatementsInDb(ctx *Context) []statements {
   perr(e)
 
   for allStmts.Next() {
-    var stmt, stmt_name, stmt_hash string
+    var stmt, stmt_name, stmt_hash *string
     var stmt_type int
 
     perr(allStmts.Scan(&stmt, &stmt_name, &stmt_hash, &stmt_type))
