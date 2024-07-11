@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,30 @@ func ListAllFilesInPath(path string) []string {
   return files
 }
 
+type statements struct {
+  stmt string
+  stmtName string
+  stmtHash string
+  stmtType int
+}
+
+func getListOfStatementsInDb(ctx *Context) []statements {
+  var stmts []statements
+
+  allStmts, e := ctx.Db.Query("select stmt, stmt_name, stmt_hash, stmt_type from morph.statements")
+  perr(e)
+
+  for allStmts.Next() {
+    var stmt, stmt_name, stmt_hash string
+    var stmt_type int
+
+    perr(allStmts.Scan(&stmt, &stmt_name, &stmt_hash, &stmt_type))
+    stmts = append(stmts, statements { stmt, stmt_name, stmt_hash, stmt_type})
+  }
+
+  return stmts
+}
+
 type executedMigration struct {
   fileName string
   fileHash string
@@ -83,6 +108,35 @@ func getListOfExecutedMigrationFiles(ctx *Context) []executedMigration{
   }
 
   return executedMigrations
+}
+
+func removeStmtByHash(ctx *Context, hash string) {
+  _, e := ctx.DbTx.Exec("delete from morph.statements where stmt_hash=$1", hash)
+  perr(e)
+}
+
+func updateStmtInDb(ctx *Context, stmt *ParsedStmt) {
+  if stmt.HasName {
+    _, err := ctx.DbTx.Exec("delete from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType)
+    perr(err)
+  }
+
+  addStmtToDb(ctx, stmt)
+}
+
+func addStmtToDb(ctx *Context, stmt *ParsedStmt) {
+  if stmt.HasName {
+    _, err := ctx.DbTx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type, stmt_name) values ($1, $2, $3, $4) on conflict (stmt_hash) do nothing", stmt.Deparsed, stmt.Hash, stmt.StmtType, stmt.Name) 
+    perr(err)
+  } else {
+    _, err := ctx.DbTx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3) on conflict (stmt_hash) do nothing", stmt.Deparsed, stmt.Hash, stmt.StmtType) 
+
+    if err != nil {
+      fmt.Printf("ERROR WITH: %s %s %d\n", stmt.Deparsed, stmt.Hash, stmt.StmtType)
+    }
+
+    perr(err)
+  }
 
 }
 

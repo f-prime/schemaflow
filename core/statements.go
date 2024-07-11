@@ -925,8 +925,7 @@ func setStmtStatus(ctx *Context, stmt *ParsedStmt) {
     stmt.Status = UNCHANGED
   } else if stmt_name_found && !stmt_hash_found {
     stmt.PrevStmt = getPrevStmtVersion(ctx, stmt)
-
-    stmt.Status= CHANGED
+    stmt.Status = CHANGED
   } else {
     stmt.Status = NEW
   }

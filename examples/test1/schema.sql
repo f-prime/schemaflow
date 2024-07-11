@@ -13,7 +13,7 @@ create table person (
 
 create table name (
   id integer references person(id) not null,
-  name text not null,
+  name text unique not null,
   created timestamp default now()
 );
 

@@ -3,9 +3,12 @@ package core
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 func getMigrationFilesSorted(ctx *Context) []string {
@@ -85,13 +88,66 @@ func checkExecutedMigrationsUnchanged(ctx *Context) {
   }
 }
 
-func getRemovedStatements(ctx *Context) []string {
+func getRemovedStatementsAndUpdateDb(ctx *Context) []string {
   var removed []string
+
+  for _, f := range getListOfStatementsInDb(ctx) {
+    hashFound := false
+    for _, s := range *ctx.Stmts {
+      if s.Hash == f.stmtHash {
+        hashFound = true
+        break
+      }
+    }
+
+    if !hashFound {
+      removed = append(removed, f.stmt)
+      removeStmtByHash(ctx, f.stmtHash)
+    }
+  }
+
   return removed
 }
 
-func writeMigrationsToNextMigration(ctx *Context) {
-  _ = filepath.Join(ctx.MigrationPath, getNextMigrationFileName(ctx))
+func generateDiffComment(ctx *Context, stmt *ParsedStmt) string {
+  prevDeparsed, e := deparseRawStmt(stmt.PrevStmt)
+  perr(e)
+
+  diffText := ""
+
+  dmp := diffmatchpatch.New()
+  cdiff := dmp.DiffMain(prevDeparsed, stmt.Deparsed, false)
+
+  for _, d := range cdiff {
+    switch d.Type {
+      case diffmatchpatch.DiffInsert: {
+        diffText += fmt.Sprintf("+++ %s\n", d.Text)
+      }
+
+      case diffmatchpatch.DiffDelete: {
+        diffText += fmt.Sprintf("--- %s\n", d.Text)
+      }
+
+      case diffmatchpatch.DiffEqual: {
+        diffText += fmt.Sprintf("@@@ %s\n", d.Text)
+      }
+    }
+  }
+
+  return fmt.Sprintf(`/*
+%s
+---------- CURRENT VERSION ----------
+%s
+----------   CHANGED TO    ----------
+%s
+----------   CHANGE DIFF   ----------
+%s
+*/`, VALIDATE_MIGRATIONS_STRING, prevDeparsed, stmt.Deparsed, diffText)
+
+}
+
+func writeMigrationsToNextMigration(ctx *Context) int {
+  nextMigrationFile := filepath.Join(ctx.MigrationPath, getNextMigrationFileName(ctx))
 
   var migrations []string
 
@@ -99,19 +155,28 @@ func writeMigrationsToNextMigration(ctx *Context) {
     switch stmt.Status {
       case NEW: {
         migrations = append(migrations, stmt.Deparsed) 
+        addStmtToDb(ctx, stmt)
       }
 
       case CHANGED: {
-        fmt.Printf("CHANGED %v\n", stmt.Deparsed)
+        migrations = append(migrations, generateDiffComment(ctx, stmt))
+        updateStmtInDb(ctx, stmt)
       }
     }
   }
 
-  for _, removed := range getRemovedStatements(ctx) {
+  for _, removed := range getRemovedStatementsAndUpdateDb(ctx) {
     fmt.Printf("removed: %v\n", removed)
   }
 
-  fmt.Printf("migrations: %v\n", migrations)
+  f, err := os.Create(nextMigrationFile)
+  perr(err)
+
+  defer f.Close()
+
+  f.WriteString(string(strings.Join(migrations, "\n")))
+
+  return len(migrations)
 }
 
 func executeMigration(ctx *Context, migrationFile string)  {
@@ -133,10 +198,23 @@ func checkForUnresolvedMigrations(ctx *Context) {
   }
 }
 
+func areMigrationsRequired(ctx *Context) bool {
+  for _, stmt := range *ctx.Stmts {
+    if stmt.Status == UNKNOWN {
+      log.Fatalf("Status of statement %v is UNKNOWN. This is a bug.", stmt)
+    } else if stmt.Status != UNCHANGED {
+      return true
+    }
+  }
+
+  return false
+}
+
 func runMigrations(ctx *Context) {
   migrations := getListOfUnexecutedMigrations(ctx)
 
   for _, migration := range migrations {
+    log.Printf("Executing %s\n", migration)
     executeMigration(ctx, migration)
   }
 }
@@ -150,12 +228,26 @@ func MakeMigrations(ctx *Context) {
   setup(ctx)
 
   ctx.Stmts = buildParsedStmts(ctx)
+  
+  if !areMigrationsRequired(ctx) {
+    log.Println("No migrations required.")
+    return
+  }
 
-  writeMigrationsToNextMigration(ctx)
+  next_migration := getNextMigrationFileName(ctx)
+
+  numOfMigrationsRun := writeMigrationsToNextMigration(ctx)
+
+  log.Printf("%d migrations have been written to %s\n", numOfMigrationsRun, next_migration)
 }
 
 func Migrate(ctx *Context) {
   setup(ctx)
+
+  if len(getListOfUnexecutedMigrations(ctx)) == 0 {
+    log.Println("All migrations have already been executed.")
+    return
+  }
 
   runMigrations(ctx)
 }
