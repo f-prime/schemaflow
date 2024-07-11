@@ -10,6 +10,6 @@ begin
 end;
 $$ language plpgsql;
 
-create or replace function calc_comething(a int, b int) returns integer as $$ 
-  select (a * b); 
+create or replace function calc_comething(a int, b int, c float) returns float as $$ 
+  select (a * b * c); 
 $$ language sql;
