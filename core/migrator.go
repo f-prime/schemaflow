@@ -85,8 +85,33 @@ func checkExecutedMigrationsUnchanged(ctx *Context) {
   }
 }
 
-func writeMigrationsToNextMigration(ctx *Context) {
+func getRemovedStatements(ctx *Context) []string {
+  var removed []string
+  return removed
+}
 
+func writeMigrationsToNextMigration(ctx *Context) {
+  _ = filepath.Join(ctx.MigrationPath, getNextMigrationFileName(ctx))
+
+  var migrations []string
+
+  for _, stmt := range *ctx.Stmts {
+    switch stmt.Status {
+      case NEW: {
+        migrations = append(migrations, stmt.Deparsed) 
+      }
+
+      case CHANGED: {
+        fmt.Printf("CHANGED %v\n", stmt.Deparsed)
+      }
+    }
+  }
+
+  for _, removed := range getRemovedStatements(ctx) {
+    fmt.Printf("removed: %v\n", removed)
+  }
+
+  fmt.Printf("migrations: %v\n", migrations)
 }
 
 func executeMigration(ctx *Context, migrationFile string)  {
@@ -125,6 +150,8 @@ func MakeMigrations(ctx *Context) {
   setup(ctx)
 
   ctx.Stmts = buildParsedStmts(ctx)
+
+  writeMigrationsToNextMigration(ctx)
 }
 
 func Migrate(ctx *Context) {
