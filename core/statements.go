@@ -3,6 +3,9 @@ package core
 import (
 	"fmt"
 	"log"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v5"
@@ -146,46 +149,6 @@ func unrollStatementDependencies(stmt *ParsedStmt, stmts []*ParsedStmt) []*Parse
   unrolled = append(unrolled, stmt)
 
   return unrolled
-}
-
-func SortStmtsByPriority(stmts []*ParsedStmt) []*ParsedStmt {
-  seen := make(map[string]bool)
-
-  sorted_stmts := make([]*ParsedStmt, 0)
-
-  for _, sch := range stmts {
-    if seen[sch.Hash] {
-      continue
-    }
-
-    if sch.StmtType == SCHEMA {
-      sorted_stmts = append(sorted_stmts, sch)
-      sch.Handled = true
-    }
-  }
-
-  for _, ext := range stmts {
-    if seen[ext.Hash] {
-      continue
-    }
-
-    if ext.StmtType == EXTENSION {
-      sorted_stmts = append(sorted_stmts, ext)
-      ext.Handled = true
-    }
-  }
-
-  for _, s := range stmts {
-    if seen[s.Hash] {
-      continue
-    }
-
-    if !s.Handled {
-      sorted_stmts = append(sorted_stmts, unrollStatementDependencies(s, stmts)...)
-    }
-  }
-
-  return sorted_stmts
 }
 
 func hydrateDependencies(stmts []*ParsedStmt) {
@@ -914,21 +877,111 @@ func hydrateStmtObject(node *pg_query.Node, ps *ParsedStmt) {
   ps.HasName = ps.Name != ""
 }
 
-func setStmtStatus(ctx *Context, stmts *ParsedStmt) *ParsedStmt {
-  return stmts
+func sortStmtsByPriority(stmts []*ParsedStmt) []*ParsedStmt {
+  seen := make(map[string]bool)
+
+  sorted_stmts := make([]*ParsedStmt, 0)
+
+  for _, sch := range stmts {
+    if seen[sch.Hash] {
+      continue
+    }
+
+    if sch.StmtType == SCHEMA {
+      sorted_stmts = append(sorted_stmts, sch)
+      sch.Handled = true
+    }
+  }
+
+  for _, ext := range stmts {
+    if seen[ext.Hash] {
+      continue
+    }
+
+    if ext.StmtType == EXTENSION {
+      sorted_stmts = append(sorted_stmts, ext)
+      ext.Handled = true
+    }
+  }
+
+  for _, s := range stmts {
+    if seen[s.Hash] {
+      continue
+    }
+
+    if !s.Handled {
+      sorted_stmts = append(sorted_stmts, unrollStatementDependencies(s, stmts)...)
+    }
+  }
+
+  return sorted_stmts
 }
 
-func ExtractStmts(ctx *Context, pr *pg_query.ParseResult) []*ParsedStmt {
+func setStmtStatus(ctx *Context, stmt *ParsedStmt) {
+  stmt_hash_found := isStmtHashFoundInDb(ctx, stmt)
+  stmt_name_found := isStmtNameFoundInDb(ctx, stmt)
+
+  if (stmt_name_found && stmt_hash_found) || (!stmt_name_found && stmt_hash_found) {
+    stmt.Status = UNCHANGED
+  } else if stmt_name_found && !stmt_hash_found {
+    stmt.PrevStmt = getPrevStmtVersion(ctx, stmt)
+
+    stmt.Status= CHANGED
+  } else {
+    stmt.Status = NEW
+  }
+}
+
+func buildParsedStmts(ctx *Context) *[]*ParsedStmt {
+  var ps []*ParsedStmt
+
+  err := filepath.Walk(ctx.SqlPath, func(path string, info fs.FileInfo, err error) error {
+    perr(err)
+
+    if !strings.HasSuffix(info.Name(), ".sql") {
+      return nil
+    }
+
+    log.Printf("Processing file %s\n", path)
+
+    fdata, err := os.ReadFile(path)
+
+    perr(err)
+
+    parsed_file, parse_err := parseSql(string(fdata))
+
+    if parse_err != nil {
+      log.Panicf("Syntax Error in %v:\n\n %v\n", path, parse_err)
+    }
+
+    extracted := extractStmts(ctx, parsed_file)
+
+    ps = append(ps, extracted...)
+
+    return nil
+  })
+
+  log.Println("Building dependency graph...");
+  hydrateDependencies(ps)
+
+  perr(err)
+
+  sorted_stmts := sortStmtsByPriority(ps)
+  return &sorted_stmts
+}
+
+func extractStmts(ctx *Context, pr *pg_query.ParseResult) []*ParsedStmt {
   var ps []*ParsedStmt
   dependencies := make([]*Dependency, 0)
 
   for _, x := range pr.Stmts {
-    dp, err := DeparseRawStmt(x)
+    dp, err := deparseRawStmt(x)
     perr(err)
     json, err := pg_query.ParseToJSON(dp)
     perr(err)
     nps := &ParsedStmt{ 
       Stmt: x, 
+      PrevStmt: nil,
       HasName: false,
       Name: "",
       Deparsed: dp, 

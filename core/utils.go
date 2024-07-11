@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
 func Perr(e error) {
@@ -59,4 +61,71 @@ func ListAllFilesInPath(path string) []string {
 
   perr(err)
   return files
+}
+
+type executedMigration struct {
+  fileName string
+  fileHash string
+}
+
+func getListOfExecutedMigrationFiles(ctx *Context) []executedMigration{
+  var executedMigrations []executedMigration
+
+  migrations, e := ctx.Db.Query("select file_name, file_hash from morph.migrations")
+  perr(e)
+
+  for migrations.Next() {
+    var file_name, file_hash string;
+
+    migrations.Scan(&file_name, &file_hash)
+
+    executedMigrations = append(executedMigrations, executedMigration { file_name, file_hash })
+  }
+
+  return executedMigrations
+
+}
+
+func isStmtHashFoundInDb(ctx *Context, stmt *ParsedStmt) bool {
+  r, e := ctx.Db.Query("select * from morph.statements where stmt_hash=$1", stmt.Hash)
+  defer r.Close()
+  perr(e)
+  return r.Next()
+}
+
+func isStmtNameFoundInDb(ctx *Context, stmt *ParsedStmt) bool {
+  if !stmt.HasName {
+    return false
+  }
+
+  r, e := ctx.Db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType);
+  defer r.Close()
+  perr(e)
+  return r.Next()
+}
+
+func getPrevStmtVersion(ctx *Context, stmt *ParsedStmt) *pg_query.RawStmt {
+  var prev_stmt_text string
+  e := ctx.Db.QueryRow("select stmt from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType).Scan(&prev_stmt_text);
+  perr(e)
+  parsed, e := pg_query.Parse(prev_stmt_text)
+  perr(e)
+
+  stmts := parsed.GetStmts()
+
+  if len(stmts) == 0 {
+    return nil
+  }
+
+  return stmts[0]
+}
+
+func readFileToString(ctx *Context, file string) string {
+  data, err := os.ReadFile(file)
+  perr(err)
+  return string(data)
+}
+
+func extractFileFromPath(path string) string {
+  return filepath.Base(path)
 }

@@ -31,11 +31,6 @@ func main() {
 
   core.Initialize(ctx) 
 
-  stmts := core.ProcessSqlFiles(ctx)
-  stmts = core.SortStmtsByPriority(stmts)
-
-  ctx.Stmts = &stmts
-
   switch ctx.Action {
     case core.MIGRATE: {
       core.Migrate(ctx)

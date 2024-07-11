@@ -6,6 +6,8 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
+const VALIDATE_MIGRATIONS_STRING = "--- REMOVE WHEN MIGRATION RESOLVED ---"
+
 type StmtType int
 
 // THE ORDER OF THIS ENUM IS THE SORT BUCKET PRIORITY ORDER
@@ -96,7 +98,6 @@ const (
   NEW
   CHANGED
   UNCHANGED
-  REMOVED
 )
 
 type DbContext struct { 
@@ -128,6 +129,7 @@ type Dependency struct {
 
 type ParsedStmt struct {
   Stmt *pg_query.RawStmt
+  PrevStmt *pg_query.RawStmt
   HasName bool
   Name string
   Deparsed string
