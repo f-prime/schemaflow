@@ -3,7 +3,7 @@ package migrations
 import (
 	"fmt"
 	"log"
-        "morph/core"
+        "schemaflow/core"
 )
 
 /* 

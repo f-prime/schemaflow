@@ -3,7 +3,7 @@ package migrations
 import (
 	"database/sql"
 	"fmt"
-        "morph/core"
+        "schemaflow/core"
 )
 
 type DiffableExtensions struct {

@@ -2,7 +2,7 @@ package migrations
 
 import (
 	"database/sql"
-        "morph/core"
+        "schemaflow/core"
 	"fmt"
 )
 

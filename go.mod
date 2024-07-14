@@ -1,4 +1,4 @@
-module morph
+module schemaflow
 
 go 1.21.5
 

@@ -13,7 +13,7 @@ func ParseArgs() *Context {
   db_name := flag.String("db", "", "db") 
 
   sql_path := flag.String("sql-path", "./", "sql-path")
-  migration_path := flag.String("migrations-path", "./morph_migrations", "migrations-path")
+  migration_path := flag.String("migrations-path", "./schemaflow_migrations", "migrations-path")
 
   action := flag.String("action", "", "action")
 

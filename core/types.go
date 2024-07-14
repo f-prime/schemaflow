@@ -142,4 +142,4 @@ type ParsedStmt struct {
   Status StmtStatus
 }
 
-const MIGRATIONS_DB = "morph_ephemeral_migration_db"
+const MIGRATIONS_DB = "schemaflow_ephemeral_migration_db"

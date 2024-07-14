@@ -918,6 +918,10 @@ func sortStmtsByPriority(stmts []*ParsedStmt) []*ParsedStmt {
 }
 
 func setStmtStatus(ctx *Context, stmt *ParsedStmt) {
+  if ctx == nil {
+    return
+  }
+
   stmt_hash_found := isStmtHashFoundInDb(ctx, stmt)
   stmt_name_found := isStmtNameFoundInDb(ctx, stmt)
 

@@ -74,7 +74,7 @@ type statements struct {
 func getListOfStatementsInDb(ctx *Context) []statements {
   var stmts []statements
 
-  allStmts, e := ctx.Db.Query("select stmt, stmt_name, stmt_hash, stmt_type from morph.statements")
+  allStmts, e := ctx.Db.Query("select stmt, stmt_name, stmt_hash, stmt_type from schemaflow.statements")
   perr(e)
 
   for allStmts.Next() {
@@ -96,7 +96,7 @@ type executedMigration struct {
 func getListOfExecutedMigrationFiles(ctx *Context) []executedMigration{
   var executedMigrations []executedMigration
 
-  migrations, e := ctx.Db.Query("select file_name, file_hash from morph.migrations")
+  migrations, e := ctx.Db.Query("select file_name, file_hash from schemaflow.migrations")
   perr(e)
 
   for migrations.Next() {
@@ -111,13 +111,13 @@ func getListOfExecutedMigrationFiles(ctx *Context) []executedMigration{
 }
 
 func removeStmtByHash(ctx *Context, hash string) {
-  _, e := ctx.DbTx.Exec("delete from morph.statements where stmt_hash=$1", hash)
+  _, e := ctx.DbTx.Exec("delete from schemaflow.statements where stmt_hash=$1", hash)
   perr(e)
 }
 
 func updateStmtInDb(ctx *Context, stmt *ParsedStmt) {
   if stmt.HasName {
-    _, err := ctx.DbTx.Exec("delete from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType)
+    _, err := ctx.DbTx.Exec("delete from schemaflow.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType)
     perr(err)
   }
 
@@ -126,10 +126,10 @@ func updateStmtInDb(ctx *Context, stmt *ParsedStmt) {
 
 func addStmtToDb(ctx *Context, stmt *ParsedStmt) {
   if stmt.HasName {
-    _, err := ctx.DbTx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type, stmt_name) values ($1, $2, $3, $4) on conflict (stmt_hash) do nothing", stmt.Deparsed, stmt.Hash, stmt.StmtType, stmt.Name) 
+    _, err := ctx.DbTx.Exec("insert into schemaflow.statements (stmt, stmt_hash, stmt_type, stmt_name) values ($1, $2, $3, $4) on conflict (stmt_hash) do nothing", stmt.Deparsed, stmt.Hash, stmt.StmtType, stmt.Name) 
     perr(err)
   } else {
-    _, err := ctx.DbTx.Exec("insert into morph.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3) on conflict (stmt_hash) do nothing", stmt.Deparsed, stmt.Hash, stmt.StmtType) 
+    _, err := ctx.DbTx.Exec("insert into schemaflow.statements (stmt, stmt_hash, stmt_type) values ($1, $2, $3) on conflict (stmt_hash) do nothing", stmt.Deparsed, stmt.Hash, stmt.StmtType) 
 
     if err != nil {
       fmt.Printf("ERROR WITH: %s %s %d\n", stmt.Deparsed, stmt.Hash, stmt.StmtType)
@@ -141,7 +141,7 @@ func addStmtToDb(ctx *Context, stmt *ParsedStmt) {
 }
 
 func isStmtHashFoundInDb(ctx *Context, stmt *ParsedStmt) bool {
-  r, e := ctx.Db.Query("select * from morph.statements where stmt_hash=$1", stmt.Hash)
+  r, e := ctx.Db.Query("select * from schemaflow.statements where stmt_hash=$1", stmt.Hash)
   defer r.Close()
   perr(e)
   return r.Next()
@@ -152,7 +152,7 @@ func isStmtNameFoundInDb(ctx *Context, stmt *ParsedStmt) bool {
     return false
   }
 
-  r, e := ctx.Db.Query("select * from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType);
+  r, e := ctx.Db.Query("select * from schemaflow.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType);
   defer r.Close()
   perr(e)
   return r.Next()
@@ -160,7 +160,7 @@ func isStmtNameFoundInDb(ctx *Context, stmt *ParsedStmt) bool {
 
 func getPrevStmtVersion(ctx *Context, stmt *ParsedStmt) *pg_query.RawStmt {
   var prev_stmt_text string
-  e := ctx.Db.QueryRow("select stmt from morph.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType).Scan(&prev_stmt_text);
+  e := ctx.Db.QueryRow("select stmt from schemaflow.statements where stmt_name=$1 and stmt_type=$2", stmt.Name, stmt.StmtType).Scan(&prev_stmt_text);
   perr(e)
   parsed, e := pg_query.Parse(prev_stmt_text)
   perr(e)

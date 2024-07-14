@@ -4,15 +4,15 @@ import "os"
 
 const MIGRATION_SCHEMA = `
 
-create schema if not exists morph;
+create schema if not exists schemaflow;
 
-create table if not exists morph.migrations (
+create table if not exists schemaflow.migrations (
   file_name text primary key not null,
   file_hash text not null,
   created timestamp default now()
 );
 
-create table if not exists morph.statements (
+create table if not exists schemaflow.statements (
   id serial primary key,
   stmt text not null,
   stmt_hash text unique not null,
@@ -22,7 +22,7 @@ create table if not exists morph.statements (
   updated timestamp default now()
 );
 
-create index on morph.statements(stmt_hash);
+create index on schemaflow.statements(stmt_hash);
 `
 
 func initializeMigrationsSchema(ctx *Context) {

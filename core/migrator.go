@@ -198,7 +198,7 @@ func executeMigration(ctx *Context, migrationFile string)  {
   _, err := ctx.DbTx.Exec(code)
   perr(err)
 
-  _, err = ctx.DbTx.Exec("insert into morph.migrations (file_name, file_hash) values ($1, $2)", filename, HashFile(migrationFile))
+  _, err = ctx.DbTx.Exec("insert into schemaflow.migrations (file_name, file_hash) values ($1, $2)", filename, HashFile(migrationFile))
   perr(err)
 }
 

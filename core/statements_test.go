@@ -28,7 +28,7 @@ func TestViewDependency(t *testing.T) {
   t.Run("view dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -62,7 +62,7 @@ func TestTableForeignKeyDependency(t *testing.T) {
   t.Run("table foreign key dependency", func(t *testing.T) {
     fke_parsed, e := pg_query.Parse(foreign_key_example)
     perr(e)
-    stmts := ExtractStmts(fke_parsed)
+    stmts := extractStmts(nil, fke_parsed)
     ps := stmts[0]
 
     correct := []Dependency {
@@ -92,7 +92,7 @@ func TestTableInheritedDependency(t *testing.T) {
   t.Run("table inherited dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(inherited_table_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency {
@@ -121,7 +121,7 @@ func TestTablePartitionDependency(t *testing.T) {
   t.Run("table partition dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(partition_table_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -149,7 +149,7 @@ func TestTableFunctionDependency(t *testing.T) {
   t.Run("table function dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(default_function_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -179,7 +179,7 @@ func TestTableSequenceDependency(t *testing.T) {
   t.Run("table sequence dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(default_function_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -209,7 +209,7 @@ func TestTableCustomTypeDependency(t *testing.T) {
   t.Run("table domain dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -238,7 +238,7 @@ func TestTableCollateDependency(t *testing.T) {
   t.Run("table collate dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -268,7 +268,7 @@ func TestTableSchemaDependency(t *testing.T) {
   t.Run("table schema dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -298,7 +298,7 @@ func TestTableTablespaceDependency(t *testing.T) {
   t.Run("table tablespace dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(domain_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -327,7 +327,7 @@ func TestInsertDependency(t *testing.T) {
   t.Run("table insert dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(insert_example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -360,7 +360,7 @@ func TestWithDependency(t *testing.T) {
   t.Run("with dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
@@ -393,7 +393,7 @@ func TestCommentDependency(t *testing.T) {
   t.Run("with dependency", func(t *testing.T) {
     ite_parsed, e := pg_query.Parse(example)
     perr(e)
-    stmts := ExtractStmts(ite_parsed)
+    stmts := extractStmts(nil, ite_parsed)
     ps := stmts[0]
 
     correct := []Dependency{
