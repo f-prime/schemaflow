@@ -1,2 +1,3 @@
 schemaflow
+test_migrations/
 *.sw[a-z]
