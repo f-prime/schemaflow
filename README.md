@@ -18,7 +18,7 @@ SchemaFlow bridges this gap for SQL-first, code-first developers. It introduces 
 
 1. `git clone https://github.com/f-prime/schemaflow`
 2. `cd schemaflow`
-3. `go mod install`
+3. `go mod download`
 4. `go build`
 5. `./schemaflow help`
 
