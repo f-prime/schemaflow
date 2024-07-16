@@ -869,8 +869,9 @@ func hydrateStmtObject(node *pg_query.Node, ps *ParsedStmt) {
     }
 
     default: {
-      log.Printf("PARSE TREE: %v\n\n", ps.Json)
-      log.Fatalf("Unknown node type %v\n", node) 
+      // log.Printf("PARSE TREE: %v\n\n", ps.Json)
+      log.Printf("WARNING: Unknown node type %v this warning should be reported.\n", node) 
+      ps.StmtType = UNKNOWN_TYPE
     }
   }
 
