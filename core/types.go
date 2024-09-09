@@ -109,9 +109,6 @@ type DbContext struct {
 }
 
 type Context struct {
-  MigrationDbContext *DbContext
-  MigrationDbTx *sql.Tx
-  MigrationDb *sql.DB
   DbContext *DbContext
   DbTx *sql.Tx
   Db *sql.DB
