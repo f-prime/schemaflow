@@ -45,12 +45,12 @@ Options
   --migrations-path   The path where your migration files will be generated.
 
 Commands
-  make          Compute schema changes in --sql-path and generate a new migration file. New migrations will be placed in the --migration-path
-  migrate       Run unexecuted migration files in the --migration-path
+  make          Compute schema changes in --sql-path and generate a new migration file. New migrations will be placed in the --migrations-path
+  migrate       Run unexecuted migration files in the --migrations-path
   help          Open this menu
 
 Examples
-  schemaflow --host=127.0.0.1 --port=5432 --user=postgres --password=postgres --db=example --sql-path=/path/to/my/schema/sql --migration-path=./project/migrations make
+  schemaflow --host=127.0.0.1 --port=5432 --user=postgres --password=postgres --db=example --sql-path=/path/to/my/schema/sql --migrations-path=./project/migrations make
   schemaflow help
 ```
 
@@ -64,7 +64,7 @@ SchemaFlow does not automatically generation the migration code for you. Instead
 
 ### Migrate
 
-The `migrate` command will execute all of the migrations inside of `--migration-path` that have not yet been executed. 
+The `migrate` command will execute all of the migrations inside of `--migrations-path` that have not yet been executed. 
 
 ### An example flow
 
