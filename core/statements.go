@@ -56,13 +56,13 @@ func pgNodesToString(nodes []*pg_query.Node) string {
 }
 
 func pgRangevarToString(rv *pg_query.RangeVar) string {
-  //sn := rv.GetSchemaname()
+  sn := rv.GetSchemaname()
 
-  //if len(sn) == 0 {
-  //  return rv.GetRelname()
-  //}
+  if len(sn) == 0 {
+    return rv.GetRelname()
+  }
 
-  return rv.GetRelname()
+  return fmt.Sprintf("%s.%s", sn, rv.GetRelname())
 }
 
 func pgTypenameToString(tn *pg_query.TypeName) string {
