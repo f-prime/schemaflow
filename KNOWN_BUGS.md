@@ -1,0 +1,4 @@
+- Deleting a statement doesn't seem to show up until a non-delete migration is created.
+- When running `migrate` on a new database, the statements table doesn't get updated. As a result the next migration will attempt to bring in those new statements, but they are already applied.
+- If a `make` is botched, there is no way to undo what was just done.
+- Syntax error have terrible debug logs
