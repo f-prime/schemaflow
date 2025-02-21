@@ -332,7 +332,7 @@ func TestInsertDependency(t *testing.T) {
 
     correct := []Dependency{
       *buildDependency(SCHEMA, "cc"),
-      *buildDependency(TABLE, "abc"),
+      *buildDependency(TABLE, "cc.abc"),
       *buildDependency(FUNCTION, "call_this_func"),
       *buildDependency(FUNCTION, "with_this_nested_call"),
       *buildDependency(GENERIC_TYPE, "my_custom_number_type"),
@@ -411,4 +411,64 @@ func TestCommentDependency(t *testing.T) {
     }
   });
  
+}
+
+func TestRuleDependency(t *testing.T) {
+  example := `
+    create rule test_rule as on delete to test.test_table do instead nothing
+  `
+
+  t.Run("rule", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(example)
+    perr(e)
+    result := extractStmts(nil, ite_parsed)
+    ps := result[0]
+
+    correct := []Dependency{
+      *buildDependency(SCHEMA, "test"),
+      *buildDependency(TABLE, "test.test_table"),
+    }
+
+    var checked []Dependency
+
+    for _, c := range ps.Dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      test_failed(t, checked, correct) 
+    }
+
+  })
+}
+
+func TestRuleWithWhereDependency(t *testing.T) {
+  example := `
+    create rule test_rule as on delete to foo.test_table where exists (select 1 from bar.dep_tab where x=1) do instead nothing
+  `
+
+  t.Run("rule", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(example)
+    perr(e)
+    result := extractStmts(nil, ite_parsed)
+    ps := result[0]
+
+    correct := []Dependency{
+      *buildDependency(SCHEMA, "foo"),
+      *buildDependency(TABLE, "foo.test_table"),
+      *buildDependency(SCHEMA, "bar"),
+      *buildDependency(TABLE, "bar.dep_tab"),
+    }
+
+    var checked []Dependency
+
+    for _, c := range ps.Dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      test_failed(t, checked, correct) 
+    }
+
+  })
 }

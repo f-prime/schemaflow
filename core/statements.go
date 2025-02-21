@@ -567,6 +567,18 @@ func hydrateStmtObject(node *pg_query.Node, ps *ParsedStmt) {
       }
     }
 
+    case *pg_query.Node_RuleStmt: {
+      ps.Name = n.RuleStmt.GetRulename()
+      ps.StmtType = RULE
+
+      relation := n.RuleStmt.GetRelation()
+
+      appendDependency(ps, SCHEMA, relation.GetSchemaname())
+      appendRangevarDependency(ps, relation)
+
+      hydrateStmtObject(n.RuleStmt.GetWhereClause(), ps)
+    }
+
     case *pg_query.Node_CreateRoleStmt: {
       cs := n.CreateRoleStmt
 
