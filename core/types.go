@@ -106,6 +106,7 @@ type DbContext struct {
   PgUser string
   PgPassword string 
   PgDbName string
+  PgSSL bool
 }
 
 type Context struct {

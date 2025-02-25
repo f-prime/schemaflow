@@ -8,7 +8,13 @@ import (
 )
 
 func CreateDbConnections(db_ctx *DbContext) *sql.DB {
-  db_conn_str := fmt.Sprintf("port=%d sslmode=disable", db_ctx.PgPort);
+  db_conn_str := fmt.Sprintf("port=%d", db_ctx.PgPort);
+
+  if db_ctx.PgSSL {
+    db_conn_str = fmt.Sprintf("%s sslmode=require", db_conn_str)
+  } else {
+    db_conn_str = fmt.Sprintf("%s sslmode=disable", db_conn_str)
+  }
 
   if db_ctx.PgHost != "" {
     db_conn_str = fmt.Sprintf("%s host=%s", db_conn_str, db_ctx.PgHost)

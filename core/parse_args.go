@@ -20,6 +20,7 @@ Options
   --db                Database name
   --sql-path          The path to your database schema files
   --migrations-path   The path where your migration files will be generated.
+  --ssl               Enable ssl mode
 
 Commands
   make          Compute schema changes in --sql-path and generate a new migration file. New migrations will be placed in the --migrations-path
@@ -42,6 +43,7 @@ func ParseArgs() *Context {
   user := flag.String("user", "postgres", "user")
   password := flag.String("password", "postgres", "password")
   db_name := flag.String("db", "", "db") 
+  ssl := flag.Bool("ssl", false, "ssl")
 
   sql_path := flag.String("sql-path", "./", "sql-path")
   migration_path := flag.String("migrations-path", "./schemaflow_migrations", "migrations-path")
@@ -86,6 +88,7 @@ func ParseArgs() *Context {
     *user,
     *password,
     *db_name,
+    *ssl,
   }
 
   ctx.SqlPath = *sql_path
