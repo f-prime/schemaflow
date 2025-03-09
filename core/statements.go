@@ -611,6 +611,24 @@ func hydrateStmtObject(node *pg_query.Node, ps *ParsedStmt) {
 
     }
 
+    case *pg_query.Node_AlterSeqStmt: {
+
+    }
+
+    case *pg_query.Node_CreateSeqStmt: {
+      seq := n.CreateSeqStmt
+      seq_name := seq.GetSequence()
+
+      ps.StmtType = SEQUENCE
+      ps.Name = pgRangevarToString(seq_name)
+
+      for _, n := range(seq.GetOptions()) {
+        hydrateStmtObject(n, ps)
+      }
+
+      appendDependency(ps, SCHEMA, seq_name.GetSchemaname())
+    }
+
     case *pg_query.Node_AlterDefaultPrivilegesStmt: {
       ps.StmtType = ALTER_DEFAULT_PRIVILEGES
       adps := n.AlterDefaultPrivilegesStmt

@@ -472,3 +472,31 @@ func TestRuleWithWhereDependency(t *testing.T) {
 
   })
 }
+
+func TestCreateSequence(t *testing.T) {
+  example := `
+  create sequence test.seq start 100
+  `
+
+  t.Run("rule", func(t *testing.T) {
+    ite_parsed, e := pg_query.Parse(example)
+    perr(e)
+    result := extractStmts(nil, ite_parsed)
+    ps := result[0]
+
+    correct := []Dependency{
+      *buildDependency(SCHEMA, "test"),
+    }
+
+    var checked []Dependency
+
+    for _, c := range ps.Dependencies {
+      checked = append(checked, *c)
+    }
+
+    if !reflect.DeepEqual(correct, checked) {
+      test_failed(t, checked, correct) 
+    }
+
+  })
+}
